@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 const http = require('http');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
+const fs = require('fs');
 
 const PORT = 3475;
 
@@ -10,8 +12,107 @@ const MCP_VERSION = '2024-11-05';
 // Server info
 const SERVER_INFO = {
   name: 'nervous-system',
-  version: '1.0.0'
+  version: '1.1.0'
 };
+
+
+const KILL_SECRET = process.env.KILL_SECRET || 'ns-kill-2026';
+const AUDIT_CHAIN_FILE = process.env.AUDIT_CHAIN_FILE || './audit-chain.json';
+const VIOLATIONS_LOG = process.env.VIOLATIONS_LOG || './guardrail-violations.log';
+const GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
+const activeDispatches = [];
+const MAX_CONCURRENT_DISPATCHES = 2;
+
+// ============================================================
+// HASH-CHAINED AUDIT TRAIL
+// ============================================================
+
+function loadAuditChain() {
+  try {
+    if (fs.existsSync(AUDIT_CHAIN_FILE)) return JSON.parse(fs.readFileSync(AUDIT_CHAIN_FILE, 'utf8'));
+  } catch (e) {}
+  return [];
+}
+
+function saveAuditChain(chain) {
+  fs.writeFileSync(AUDIT_CHAIN_FILE, JSON.stringify(chain, null, 2));
+}
+
+function computeHash(prevHash, content) {
+  return crypto.createHash('sha256').update(prevHash + content).digest('hex');
+}
+
+function addAuditEntry(type, detail) {
+  const chain = loadAuditChain();
+  const prevHash = chain.length > 0 ? chain[chain.length - 1].hash : GENESIS_HASH;
+  const timestamp = new Date().toISOString();
+  const content = timestamp + '|' + type + '|' + detail;
+  const hash = computeHash(prevHash, content);
+  const entry = { id: chain.length + 1, timestamp, type, detail, hash, prev_hash: prevHash };
+  chain.push(entry);
+  saveAuditChain(chain);
+  try { fs.appendFileSync(VIOLATIONS_LOG, timestamp + ' ' + type + ': ' + detail + '\n'); } catch (e) {}
+  return entry;
+}
+
+function verifyAuditChain() {
+  const chain = loadAuditChain();
+  if (chain.length === 0) return { valid: true, entries: 0, message: 'Empty chain' };
+  let valid = true;
+  let brokenAt = null;
+  for (let i = 0; i < chain.length; i++) {
+    const entry = chain[i];
+    const expectedPrev = i === 0 ? GENESIS_HASH : chain[i - 1].hash;
+    if (entry.prev_hash !== expectedPrev) { valid = false; brokenAt = i; break; }
+    const content = entry.timestamp + '|' + entry.type + '|' + entry.detail;
+    const expectedHash = computeHash(expectedPrev, content);
+    if (entry.hash !== expectedHash) { valid = false; brokenAt = i; break; }
+  }
+  return { valid, entries: chain.length, brokenAt, lastEntry: chain[chain.length - 1] };
+}
+
+function getFreeMB() {
+  try {
+    const { execSync } = require('child_process');
+    const mem = execSync('free -m 2>/dev/null | grep Mem', { timeout: 2000 }).toString().trim().split(/\s+/);
+    return parseInt(mem[3]) || 0;
+  } catch (e) { return 0; }
+}
+
+function cleanupDispatches() {
+  activeDispatches.forEach(function(d) {
+    if (d.status === 'active') {
+      try { process.kill(d.pid, 0); } catch (e) {
+        d.status = 'completed';
+        d.endTime = Date.now();
+        try {
+          const lines = fs.readFileSync(d.logFile, 'utf8').split('\n');
+          d.summary = lines.slice(-20).join('\n');
+        } catch (e2) { d.summary = '(log not readable)'; }
+      }
+    }
+  });
+}
+
+function dispatchToLLM(task, maxTurns) {
+  if (!task) return { error: 'No task provided' };
+  cleanupDispatches();
+  const activeCount = activeDispatches.filter(function(d) { return d.status === 'active'; }).length;
+  if (activeCount >= MAX_CONCURRENT_DISPATCHES) return { error: 'Max concurrent dispatches reached (' + MAX_CONCURRENT_DISPATCHES + ')' };
+  const freeMB = getFreeMB();
+  if (freeMB < 500) return { error: 'Not enough RAM: ' + freeMB + 'MB free (need 500MB+)' };
+  const taskId = 'task-' + Date.now();
+  const logFile = '/tmp/' + taskId + '.log';
+  const turns = maxTurns || 25;
+  const taskFile = '/tmp/' + taskId + '.md';
+  fs.writeFileSync(taskFile, task);
+  const proc = spawn('claude', ['-p', 'Read ' + taskFile + ' and execute the task described.', '--max-turns', String(turns)], { detached: true, stdio: ['ignore', fs.openSync(logFile, 'w'), fs.openSync(logFile, 'a')] });
+  proc.unref();
+  const dispatch = { pid: proc.pid, taskId, taskFile, logFile, startTime: Date.now(), status: 'active', maxTurns: turns };
+  activeDispatches.push(dispatch);
+  addAuditEntry('DISPATCH', 'Task dispatched: ' + taskId + ', PID: ' + proc.pid);
+  return { dispatched: true, pid: proc.pid, taskId, logFile, message: 'Agent running. Check log for progress.' };
+}
 
 // ============================================================
 // THE NERVOUS SYSTEM - Content
@@ -632,6 +733,40 @@ const TOOLS = [
       },
       required: ['topic']
     }
+  },
+
+  {
+    name: 'emergency_kill_switch',
+    annotations: { title: 'Emergency Kill Switch', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    description: 'Emergency kill switch - stops all managed processes immediately. Requires KILL_SECRET. Use only in emergencies. Logs activation to tamper-evident audit trail.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        secret: { type: 'string', description: 'Kill switch secret (env: KILL_SECRET)' },
+        command: { type: 'string', description: 'Custom command (default: pm2 stop all)' },
+        source: { type: 'string', description: 'Who activated it' }
+      },
+      required: ['secret']
+    }
+  },
+  {
+    name: 'verify_audit_chain',
+    annotations: { title: 'Verify Audit Chain', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Verify the integrity of the hash-chained audit trail. Each entry is cryptographically linked to the previous one. Any tampering breaks the chain.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'dispatch_to_llm',
+    annotations: { title: 'Dispatch to LLM Agent', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    description: 'Dispatch a task to a background LLM agent. The agent runs independently and writes results to a log file. Max 2 concurrent dispatches. Requires 500MB+ free RAM.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'Task description for the agent' },
+        max_turns: { type: 'number', description: 'Max turns for the agent (default: 25)' }
+      },
+      required: ['task']
+    }
   }
 ];
 
@@ -781,7 +916,29 @@ function handleToolCall(name, args) {
       }
     }
 
-    default:
+    case 'emergency_kill_switch': {
+      if (args.secret !== KILL_SECRET) return { error: 'Invalid secret', activated: false };
+      const cmd = args.command || 'pm2 stop all';
+      const source = args.source || 'MCP tool';
+      addAuditEntry('KILL_SWITCH', 'Activated by ' + source + '. Command: ' + cmd);
+      try {
+        const { execSync } = require('child_process');
+        const output = execSync(cmd, { timeout: 30000 }).toString();
+        return { activated: true, timestamp: new Date().toISOString(), source, command: cmd, output: output.substring(0, 500) };
+      } catch (e) {
+        return { activated: true, timestamp: new Date().toISOString(), source, command: cmd, error: e.message };
+      }
+    }
+
+    case 'verify_audit_chain': {
+      return verifyAuditChain();
+    }
+
+    case 'dispatch_to_llm': {
+      return dispatchToLLM(args.task, args.max_turns);
+    }
+
+        default:
       return { error: 'Unknown tool' };
   }
 }
@@ -908,11 +1065,55 @@ const server = http.createServer((req, res) => {
   // Health check
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.0.0', protocol: MCP_VERSION }));
+    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.1.0', protocol: MCP_VERSION }));
     return;
   }
 
-  // MCP SSE endpoint
+  // POST /kill - Kill Switch endpoint
+  if (req.method === 'POST' && url.pathname === '/kill') {
+    const auth = req.headers.authorization || '';
+    const token = auth.replace('Bearer ', '');
+    if (token !== KILL_SECRET) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized', activated: false }));
+      return;
+    }
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      let cmd = 'pm2 stop all';
+      let source = 'HTTP';
+      try { const parsed = JSON.parse(body); if (parsed.command) cmd = parsed.command; if (parsed.source) source = parsed.source; } catch (e) {}
+      addAuditEntry('KILL_SWITCH', 'Activated by ' + source + '. Command: ' + cmd);
+      try {
+        const { execSync } = require('child_process');
+        const output = execSync(cmd, { timeout: 30000 }).toString();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ activated: true, timestamp: new Date().toISOString(), source, command: cmd, output: output.substring(0, 500) }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ activated: true, error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // GET /audit/verify
+  if (req.method === 'GET' && url.pathname === '/audit/verify') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(verifyAuditChain()));
+    return;
+  }
+
+  // GET /dispatches
+  if (req.method === 'GET' && url.pathname === '/dispatches') {
+    cleanupDispatches();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ active: activeDispatches.filter(d => d.status === 'active'), completed: activeDispatches.filter(d => d.status === 'completed'), max_concurrent: MAX_CONCURRENT_DISPATCHES, free_ram_mb: getFreeMB() }));
+    return;
+  }
+
+    // MCP SSE endpoint
   if (req.method === 'GET' && url.pathname === '/sse') {
     const sessionId = crypto.randomUUID();
     res.writeHead(200, {

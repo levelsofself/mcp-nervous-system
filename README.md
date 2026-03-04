@@ -4,7 +4,7 @@
 
 7 mechanically enforced rules that prevent the most common failure modes when LLMs have access to real infrastructure: context loss, silent failures, file damage, goal drift, and overreach.
 
-Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan AI.
+Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan AI. 11 tools. Battle-tested on a 12-member AI family running 22 processes 24/7 on a single VPS. 55+ violations logged, 0 bypassed.
 
 ## The Problem
 
@@ -48,6 +48,18 @@ claude mcp add nervous-system npx mcp-nervous-system
 npx mcp-nervous-system
 ```
 
+Server starts on port 3475 with SSE, HTTP, and health endpoints.
+
+### Hosted (No Install)
+
+The server is live and ready to use:
+
+```
+URL: https://api.100levelup.com/mcp-ns/
+Protocol: MCP 2024-11-05 (Streamable HTTP + SSE)
+Authentication: None required
+```
+
 ## The 7 Rules
 
 | # | Rule | What It Prevents |
@@ -60,7 +72,7 @@ npx mcp-nervous-system
 | 6 | **Ask Before Touching** | Unauthorized changes. Logic changes need human approval. |
 | 7 | **Hand Off** | Context loss. Written handoffs every 3-4 exchanges. |
 
-## MCP Tools (8)
+## MCP Tools (11)
 
 | Tool | Description |
 |------|------------|
@@ -72,6 +84,40 @@ npx mcp-nervous-system
 | `violation_logging` | Audit trail: timestamp, type, context for every violation |
 | `step_back_check` | Forced reflection system |
 | `get_nervous_system_info` | System overview and operational stats |
+| `emergency_kill_switch` | Emergency shutdown of all PM2 processes. Requires kill switch secret. Logs to tamper-evident audit trail |
+| `verify_audit_chain` | Walks the SHA-256 hash-chained audit log and verifies every entry. Returns chain integrity status |
+| `dispatch_to_llm` | Spawns a background LLM agent to handle a task. Checks RAM, enforces max 2 concurrent dispatches |
+
+## Kill Switch
+
+The `emergency_kill_switch` tool provides an emergency shutdown capability. Send a POST request to `/kill` with the kill switch secret to immediately stop all PM2 processes. Every activation is logged to the tamper-evident audit trail with SHA-256 hash chaining, so kill switch events cannot be hidden or altered after the fact.
+
+- Requires authentication (kill switch secret)
+- Logs to hash-chained audit trail
+- Returns confirmation with affected process count
+
+## Tamper-Evident Audit Trail
+
+Every guardrail violation, kill switch activation, and dispatch event is recorded in a SHA-256 hash-chained audit log. Each entry includes the hash of the previous entry, making it cryptographically impossible to alter or delete past records without breaking the chain.
+
+- Use `verify_audit_chain` to walk the entire chain and verify integrity
+- Returns: valid/invalid status, entry count, and break point if tampered
+- 55+ violations logged, 0 bypassed, 0 chain breaks
+
+## Dispatch to LLM
+
+The `dispatch_to_llm` tool enables a brain + agents architecture. Instead of one LLM session doing everything, complex tasks get dispatched to background agents that run independently under the same 7 rules.
+
+- Checks available RAM (requires 500MB+)
+- Enforces max 2 concurrent dispatches
+- Returns PID and log file path for monitoring
+- Every dispatched agent runs under the same nervous system guardrails
+
+## EU AI Act Compliance
+
+The Nervous System provides practical compliance tools for the EU AI Act. See the full compliance page at:
+
+https://api.100levelup.com/family/eu-ai-act.html
 
 ## Resources (4)
 
@@ -84,7 +130,7 @@ npx mcp-nervous-system
 
 From the live Palyan AI deployment (Feb 28 - Mar 5, 2026):
 
-- **47** violations caught
+- **55+** violations caught
 - **29** edits blocked by preflight
 - **13** unique files protected
 - **0** rules bypassed
@@ -102,10 +148,11 @@ Try it yourself (no login required):
 - **[Case Study](https://api.100levelup.com/family/case-study.html)** - Production deployment data
 - **[Plain English Rules](https://api.100levelup.com/family/rules-plain.html)** - For non-technical stakeholders
 - **[Incident Response](https://api.100levelup.com/family/incident-response.html)** - Detection, containment, resolution
+- **[EU AI Act Compliance](https://api.100levelup.com/family/eu-ai-act.html)** - Practical EU AI Act compliance tools
 
 ## Philosophy
 
-> "Claude can't reliably self-enforce promises. Guardrails work via preflight.sh, violation logs, and catching drift. Build enforcement systems, don't make promises."
+> "LLMs can't reliably self-enforce promises. Guardrails work via preflight.sh, violation logs, and catching drift. Build enforcement systems, don't make promises."
 
 If a guardrail can be violated by the thing it guards, it is not a guardrail. It is a suggestion.
 

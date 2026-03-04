@@ -1,7 +1,7 @@
 {
   "name": "mcp-nervous-system",
-  "version": "1.0.0",
-  "description": "The Nervous System - LLM Behavioral Enforcement Framework. 7 mechanically enforced rules that prevent context loss, silent failures, file damage, drift, and overreach. MCP server for Claude Desktop, Claude Code, and any MCP-compatible client.",
+  "version": "1.1.0",
+  "description": "The Nervous System - LLM Behavioral Enforcement Framework. 7 mechanically enforced rules, kill switch, tamper-evident audit trail, and dispatch-to-LLM agents. MCP server for Claude Desktop, Claude Code, and any MCP-compatible client.",
   "main": "server.js",
   "bin": {
     "mcp-nervous-system": "./server.js"
@@ -19,7 +19,9 @@
     "guardrails",
     "claude",
     "anthropic",
-    "nervous-system"
+    "nervous-system",
+    "kill-switch",
+    "audit-trail"
   ],
   "author": "Arthur Palyan <palyanai@gmail.com>",
   "license": "MIT",
