@@ -76,7 +76,7 @@ function migrateExistingViolations() {
       chain.push({ id: chain.length + 1, timestamp, type, detail: detail || type, hash, prev_hash: prevHash });
     }
     saveAuditChain(chain);
-    console.log(`[NS] Migrated ${chain.length} violations to audit chain`);
+    console.error(`[NS] Migrated ${chain.length} violations to audit chain`);
   } catch (e) { console.error('[NS] Migration error:', e.message); }
 }
 
@@ -963,8 +963,8 @@ const server = http.createServer((req, res) => {
 migrateExistingViolations();
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`[MCP Server] Nervous System v1.1.0 running on port ${PORT}`);
-  console.log(`[MCP Server] SSE: /sse | HTTP: /mcp | Health: /health | Kill: POST /kill | Audit: GET /audit/verify | Dispatches: GET /dispatches`);
-  console.log(`[MCP Server] Protocol: ${MCP_VERSION}`);
-  console.log(`[MCP Server] Tools: ${TOOLS.length} (including kill switch, audit chain, dispatch)`);
+  console.error(`[MCP Server] Nervous System v1.1.0 running on port ${PORT}`);
+  console.error(`[MCP Server] SSE: /sse | HTTP: /mcp | Health: /health | Kill: POST /kill | Audit: GET /audit/verify | Dispatches: GET /dispatches`);
+  console.error(`[MCP Server] Protocol: ${MCP_VERSION}`);
+  console.error(`[MCP Server] Tools: ${TOOLS.length} (including kill switch, audit chain, dispatch)`);
 });
