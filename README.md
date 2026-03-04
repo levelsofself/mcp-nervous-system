@@ -1,111 +1,116 @@
-# The Nervous System - LLM Behavioral Enforcement Framework
+# The Nervous System
 
-Anthropic built the brain. This is the nervous system.
+**LLM Behavioral Enforcement Framework**
 
-LLMs are powerful but they hurt themselves - they lose context between sessions, loop on problems instead of dispatching, silently fail without progress notes, edit protected files, drift from the real problem, and solve instead of asking. The Nervous System is a behavioral enforcement layer that wraps any LLM deployment with guardrails, handoffs, preflight checks, violation logging, and forced reflection cycles.
+7 mechanically enforced rules that prevent the most common failure modes when LLMs have access to real infrastructure: context loss, silent failures, file damage, goal drift, and overreach.
 
-7 core rules. Battle-tested on a 12-member AI family running 24/7 on a single VPS.
+Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan AI.
 
-## Tools
+## The Problem
 
-| Tool | Description |
-|------|-------------|
-| `get_framework` | Returns the complete nervous system framework - all behavioral rules, guardrails, and enforcement patterns |
-| `session_handoff` | Get the session handoff system that solves context loss between LLM sessions. Templates, examples, best practices |
-| `preflight_check` | Get the preflight check system that protects files from accidental LLM edits. Script pattern, enforcement flow, templates |
-| `worklog` | Get the worklog pattern - continuous progress writing that prevents silent failures |
-| `guardrail_rules` | Returns behavioral rules: DISPATCH DONT DO, ASK BEFORE TOUCHING, STEP BACK, WRITE PROGRESS, HAND OFF, PERMISSION PROTOCOL |
-| `violation_logging` | Get the violation logging pattern - how to track, log, and enforce guardrail breaches |
-| `step_back_check` | The 7-level reflection system. Forces the LLM to zoom out and ask whether current work serves the real mission |
-| `get_nervous_system_info` | Overview of the entire nervous system - what it is, where it came from, how to implement it, what problems it solves |
+When you give an LLM access to your file system, bash, and production infrastructure, it will eventually:
 
-## Resources
+- Edit a file it shouldn't touch
+- Lose context between sessions and start over
+- Drift from the original objective during long tasks
+- Fail silently when a session times out
+- Make logic changes without asking
+- Disappear into debug loops
 
-| URI | Name | Description |
-|-----|------|-------------|
-| `nervous-system://framework` | The Nervous System Framework | Complete behavioral enforcement framework for LLM management |
-| `nervous-system://quick-start` | Quick Start Guide | How to implement the nervous system in your own LLM deployment |
-| `nervous-system://rules` | The 7 Core Rules | All 7 behavioral rules with explanations and enforcement |
-| `nervous-system://templates` | Templates | Ready-to-use templates for handoffs, worklogs, preflight, and untouchable lists |
+The Nervous System solves all of these with rules enforced by external mechanisms the LLM cannot override.
 
-## The 7 Core Rules
+## Install
 
-1. **DISPATCH DONT DO** - If a task takes more than 2 messages, write a task file and dispatch a background agent. Do not iterate.
-2. **UNTOUCHABLE = UNTOUCHABLE** - Maintain a list of protected files. Run a preflight check before any edit. If blocked, STOP.
-3. **WRITE PROGRESS AS YOU GO** - Before each action, note what you are about to do. If you time out, the next instance sees where you stopped.
-4. **STEP BACK EVERY 4 MESSAGES** - Stop. See all 7 levels. Ask: are we solving the real problem? Say it to the human, then continue.
-5. **DELEGATE AND RETURN** - When you dispatch a task, come back and talk to the human. Do not wait silently.
-6. **ASK BEFORE TOUCHING** - Before modifying any system file, config, process, or provider: ask. Run preflight first.
-7. **HAND OFF EVERY FEW MESSAGES** - Update the session handoff file every 3-4 exchanges.
+### Claude Desktop
 
-## Setup as Custom MCP Connector
-
-### Hosted (Recommended)
-
-The server is live and ready to use:
-
-```
-URL: https://api.100levelup.com/mcp-ns/
-Protocol: MCP 2024-11-05 (Streamable HTTP + SSE)
-Authentication: None required
-```
-
-Add to your MCP client config:
+Add to your `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "nervous-system": {
-      "url": "https://api.100levelup.com/mcp-ns/"
+      "command": "npx",
+      "args": ["-y", "mcp-nervous-system"]
     }
   }
 }
 ```
 
-### Self-Hosted
+### Claude Code
 
-1. Clone this repo
-2. Run `node server.js`
-3. Server starts on port 3475
+```bash
+claude mcp add nervous-system npx mcp-nervous-system
+```
 
-## What Problems It Solves
+### Direct
 
-- **Context Loss** - LLM sessions are ephemeral. Session handoff files preserve continuity.
-- **Infinite Loops** - LLMs debug the same error for 10+ messages. DISPATCH DONT DO stops this.
-- **Silent Failures** - Sessions time out mid-task. WRITE PROGRESS makes every step visible.
-- **Editing Protected Files** - LLMs break working systems with "improvements." Preflight checks block this.
-- **Mission Drift** - LLMs zoom into details. STEP BACK forces reflection every 4 messages.
-- **Solving Instead of Asking** - LLMs patch without checking. ASK BEFORE TOUCHING enforces consent.
-- **Lost Progress on Timeout** - Multi-step tasks vanish. Continuous worklogs + handoffs preserve everything.
+```bash
+npx mcp-nervous-system
+```
 
-## Example Prompts
+## The 7 Rules
 
-Try these with any MCP-connected AI assistant:
+| # | Rule | What It Prevents |
+|---|------|-----------------|
+| 1 | **Dispatch Don't Do** | Debug loops, rabbit holes. Tasks > 2 messages get dispatched. |
+| 2 | **Untouchable** | File damage. Protected files mechanically blocked from editing. |
+| 3 | **Write Progress** | Silent failures. Progress noted before each action. |
+| 4 | **Step Back Every 4** | Goal drift. Forced reflection every 4 messages. |
+| 5 | **Delegate and Return** | Invisible work. Background tasks reported immediately. |
+| 6 | **Ask Before Touching** | Unauthorized changes. Logic changes need human approval. |
+| 7 | **Hand Off** | Context loss. Written handoffs every 3-4 exchanges. |
 
-1. **"Show me the nervous system framework for managing LLMs"** - Returns the complete framework with all 7 core rules, permission protocol, and enforcement patterns.
+## MCP Tools (8)
 
-2. **"How do I prevent my LLM from editing protected files?"** - Returns the preflight check system with script templates, enforcement flow, and untouchable file list patterns.
+| Tool | Description |
+|------|------------|
+| `get_framework` | Complete framework: all rules, permission protocol, enforcement patterns |
+| `guardrail_rules` | The 7 core rules with triggers, enforcement, and failure modes |
+| `preflight_check` | File protection system: shell script blocks edits to protected files |
+| `session_handoff` | Context preservation: templates for handoff documents |
+| `worklog` | Progress documentation pattern |
+| `violation_logging` | Audit trail: timestamp, type, context for every violation |
+| `step_back_check` | Forced reflection system |
+| `get_nervous_system_info` | System overview and operational stats |
 
-3. **"Give me a session handoff template"** - Returns a ready-to-use template for preserving context between LLM sessions.
+## Resources (4)
 
-4. **"What are the guardrail rules for LLM behavioral enforcement?"** - Returns all 6 guardrail rules with implementation details and violation signs.
+- `nervous-system://framework` - The complete framework
+- `nervous-system://quick-start` - Quick start guide
+- `nervous-system://rules` - The 7 core rules
+- `nervous-system://templates` - Templates for handoffs, worklogs, preflight
 
-5. **"How do I implement the nervous system in my own deployment?"** - Returns the 7-step implementation guide from file protection to reflection cycles.
+## Production Stats
 
-## About
+From the live Palyan AI deployment (Feb 28 - Mar 5, 2026):
 
-**The Nervous System** was built by Arthur Palyan to manage a 12-member AI family operating 24/7 on a single $12/month VPS. After months of LLMs breaking working systems, looping on problems, and losing context between sessions, the nervous system emerged as the behavioral enforcement layer that keeps the brain from hurting itself.
+- **47** violations caught
+- **29** edits blocked by preflight
+- **13** unique files protected
+- **0** rules bypassed
+- **22** processes monitored
+- **7** days continuous operation
 
-- Website: https://www.levelsofself.com
-- Game: https://100levelup.com
-- Privacy: https://api.100levelup.com/family/privacy.html
-- MCP Privacy: https://api.100levelup.com/family/mcp-privacy.html
+## Live Demo
 
-## Support
+Try it yourself (no login required):
 
-- Email: artpalyan@levelsofself.com
-- Book a call: https://calendly.com/levelsofself/zoom
+- **[Interactive Demo](https://api.100levelup.com/family/arthur.html?guest=1)** - Talk to a governed LLM and try to break the rules
+- **[Audit Dashboard](https://api.100levelup.com/family/audit.html)** - See real violation history with timeline
+- **[System Status](https://api.100levelup.com/family/status.html)** - Live health checks
+- **[API Documentation](https://api.100levelup.com/family/api-docs.html)** - Full tool and resource reference
+- **[Case Study](https://api.100levelup.com/family/case-study.html)** - Production deployment data
+- **[Plain English Rules](https://api.100levelup.com/family/rules-plain.html)** - For non-technical stakeholders
+- **[Incident Response](https://api.100levelup.com/family/incident-response.html)** - Detection, containment, resolution
+
+## Philosophy
+
+> "Claude can't reliably self-enforce promises. Guardrails work via preflight.sh, violation logs, and catching drift. Build enforcement systems, don't make promises."
+
+If a guardrail can be violated by the thing it guards, it is not a guardrail. It is a suggestion.
+
+Every rule in the Nervous System is enforced by an external mechanism: a shell script, a timer, a separate monitoring process. The LLM cannot override, circumvent, or ignore them.
 
 ## License
 
-MIT - see [LICENSE](LICENSE)
+MIT

@@ -1,0 +1,37 @@
+{
+  "name": "mcp-nervous-system",
+  "version": "1.0.0",
+  "description": "The Nervous System - LLM Behavioral Enforcement Framework. 7 mechanically enforced rules that prevent context loss, silent failures, file damage, drift, and overreach. MCP server for Claude Desktop, Claude Code, and any MCP-compatible client.",
+  "main": "server.js",
+  "bin": {
+    "mcp-nervous-system": "./server.js"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "llm",
+    "ai-safety",
+    "ai-governance",
+    "behavioral-enforcement",
+    "guardrails",
+    "claude",
+    "anthropic",
+    "nervous-system"
+  ],
+  "author": "Arthur Palyan <palyanai@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/levelsofself/mcp-nervous-system"
+  },
+  "homepage": "https://api.100levelup.com/family/gateway.html",
+  "bugs": {
+    "url": "https://github.com/levelsofself/mcp-nervous-system/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
