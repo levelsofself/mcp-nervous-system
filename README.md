@@ -4,7 +4,7 @@
 
 7 mechanically enforced rules that prevent the most common failure modes when LLMs have access to real infrastructure: context loss, silent failures, file damage, goal drift, and overreach.
 
-Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan AI. 11 tools. Battle-tested on a 12-member AI family running 22 processes 24/7 on a single VPS. 55+ violations logged, 0 bypassed.
+Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan AI. 14 tools including task complexity classification and user intent parsing. Battle-tested on an 11-member AI family running 28 processes 24/7 on a single VPS. 58+ violations logged, 0 bypassed.
 
 ## The Problem
 
@@ -60,6 +60,18 @@ Protocol: MCP 2024-11-05 (Streamable HTTP + SSE)
 Authentication: None required
 ```
 
+## NEW in v1.3.0
+
+**classify_task_complexity** (free tier)
+Analyzes any task across 6 dimensions (scope, judgment, risk, context depth, ambiguity, verification difficulty) and recommends the optimal model tier. Routes simple tasks to Haiku (~90% savings), standard tasks to Sonnet (~60% savings), and complex reasoning to Opus. Pass optional structured hints for higher accuracy.
+
+**parse_user_intent** (free tier)
+Decomposes user requests into numbered deliverables with confidence scoring. Below 80% confidence: the model should clarify before executing, not guess. Detects ambiguity, unresolved pronouns, hedging language, and implicit expectations. The 80% rule: understand first, execute second.
+
+These tools work together. parse_user_intent breaks down what the person wants. classify_task_complexity routes each piece to the right model. The Nervous System enforces the rules while execution happens.
+
+**Positioning: Auto mode (launching March 12) decides what Claude CAN do. The Nervous System governs HOW it behaves while doing it.**
+
 ## The 7 Rules
 
 | # | Rule | What It Prevents |
@@ -72,7 +84,7 @@ Authentication: None required
 | 6 | **Ask Before Touching** | Unauthorized changes. Logic changes need human approval. |
 | 7 | **Hand Off** | Context loss. Written handoffs every 3-4 exchanges. |
 
-## MCP Tools (11)
+## MCP Tools (14)
 
 | Tool | Description |
 |------|------------|
@@ -87,6 +99,9 @@ Authentication: None required
 | `emergency_kill_switch` | Emergency shutdown of all PM2 processes. Requires kill switch secret. Logs to tamper-evident audit trail |
 | `verify_audit_chain` | Walks the SHA-256 hash-chained audit log and verifies every entry. Returns chain integrity status |
 | `dispatch_to_llm` | Spawns a background LLM agent to handle a task. Checks RAM, enforces max 2 concurrent dispatches |
+| `classify_task_complexity` | Analyzes task across 6 dimensions, recommends optimal model tier (Haiku/Sonnet/Opus) |
+| `parse_user_intent` | Decomposes requests into numbered deliverables with confidence scoring. 80% gate |
+| `get_positioning` | Returns competitive positioning and differentiation messaging |
 
 ## Kill Switch
 
@@ -102,7 +117,7 @@ Every guardrail violation, kill switch activation, and dispatch event is recorde
 
 - Use `verify_audit_chain` to walk the entire chain and verify integrity
 - Returns: valid/invalid status, entry count, and break point if tampered
-- 55+ violations logged, 0 bypassed, 0 chain breaks
+- 58+ violations logged, 0 bypassed, 0 chain breaks
 
 ## Dispatch to LLM
 
@@ -130,11 +145,11 @@ https://api.100levelup.com/family/eu-ai-act.html
 
 From the live Palyan AI deployment (Feb 28 - Mar 5, 2026):
 
-- **55+** violations caught
+- **58+** violations caught
 - **29** edits blocked by preflight
 - **13** unique files protected
 - **0** rules bypassed
-- **22** processes monitored
+- **28** processes monitored
 - **7** days continuous operation
 
 ## Live Demo
