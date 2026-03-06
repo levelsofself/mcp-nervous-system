@@ -51,7 +51,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text: JSON.stringify({ name: "The Nervous System", version: "1.1.1", description: "LLM Behavioral Enforcement Framework", rules: RULES, total_tools: 11, production_stats: { violations_caught: 56, rules_bypassed: 0, edits_blocked: 32, processes_monitored: 22 } }, null, 2) }] };
     
     case "get_nervous_system_info":
-      return { content: [{ type: "text", text: JSON.stringify({ name: "The Nervous System", version: "1.1.1", author: "Arthur Palyan", company: "Palyan AI / Levels of Self LLC", website: "https://www.levelsofself.com", demo: "https://api.100levelup.com/family/arthur.html?guest=1", github: "https://github.com/levelsofself/mcp-nervous-system", npm: "https://www.npmjs.com/package/mcp-nervous-system", tools: 11, rules: 7, production_stats: { violations: 56, bypasses: 0, blocked_edits: 32, uptime_days: 25, monthly_cost: "$12" } }, null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ name: "The Nervous System", version: "1.1.1", author: "Arthur Palyan", company: "Palyan Family AI System / Levels of Self LLC", website: "https://www.levelsofself.com", demo: "https://api.100levelup.com/family/arthur.html?guest=1", github: "https://github.com/levelsofself/mcp-nervous-system", npm: "https://www.npmjs.com/package/mcp-nervous-system", tools: 11, rules: 7, production_stats: { violations: 56, bypasses: 0, blocked_edits: 32, uptime_days: 25, monthly_cost: "$12" } }, null, 2) }] };
     
     case "check_preflight":
       const fp = args?.file_path || "unknown";
