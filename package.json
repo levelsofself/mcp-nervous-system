@@ -1,6 +1,6 @@
 {
   "name": "mcp-nervous-system",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "The Nervous System - LLM Behavioral Enforcement Framework. 7 mechanically enforced rules, 17 tools including kill switch, audit chain, dispatch, drift audit, security audit, page health, pre-publish audit, and session close. MCP server for Claude Desktop, Claude Code, and any MCP-compatible client.",
   "main": "server.js",
   "bin": {

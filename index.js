@@ -1921,7 +1921,6 @@ function runMCPAnalyzer(mode, outputPath) {
   const result = {
     timestamp: new Date().toISOString(),
     mode: mode || 'analyze',
-    project: {},
     recommended_tools: [],
     claude_md: null,
     config_suggestions: null
@@ -2028,7 +2027,9 @@ function runMCPAnalyzer(mode, outputPath) {
     characteristics.project_type = 'general';
   }
 
-  result.project = characteristics;
+  // Don't expose raw project internals - just use them for recommendations
+  result.project_type = characteristics.project_type;
+  result.has_config = characteristics.has_config;
 
   // Step 2: Recommend tools based on project type
   const recommendations = [];
@@ -2060,7 +2061,7 @@ function runMCPAnalyzer(mode, outputPath) {
     recommendations.push({
       tool: 'guardrail_rules',
       priority: 'high',
-      reason: 'You have ' + (characteristics.protected_count || 'multiple') + ' protected files. These rules enforce discipline.'
+      reason: 'Protected files detected. These rules enforce discipline around file edits.'
     });
   }
 
@@ -2073,7 +2074,7 @@ function runMCPAnalyzer(mode, outputPath) {
     recommendations.push({
       tool: 'security_audit',
       priority: 'high',
-      reason: 'Production system with ' + characteristics.file_count + ' files. Security audit catches exposed secrets and misconfigurations.'
+      reason: 'Production system detected. Security audit catches exposed secrets and misconfigurations.'
     });
     recommendations.push({
       tool: 'emergency_kill_switch',
@@ -2198,23 +2199,17 @@ function runMCPAnalyzer(mode, outputPath) {
     claudeMd += '- Kill switch is available for emergencies\n\n';
   }
 
-  result.claude_md = claudeMd;
+  // Only include CLAUDE.md content in write/reload mode, not analyze
+  if (mode === 'write' || mode === 'reload') {
+    result.claude_md_generated = true;
+  }
 
   // Step 4: Config suggestions (if no config exists)
   if (!characteristics.has_config) {
-    result.config_suggestions = {
-      message: 'No nervous-system.config.json found. Create one to enable full audit capabilities.',
-      suggested_config: {
-        project_root: projectRoot,
-        data_dir: path.join(projectRoot, 'data'),
-        logs_dir: path.join(projectRoot, 'logs'),
-        html_dir: characteristics.has_html_pages ? path.join(projectRoot, 'public') : null,
-        protected_files_list: path.join(projectRoot, 'PROTECTED_FILES.txt'),
-        config_file: path.join(projectRoot, 'system-config.json'),
-        pm2_managed: characteristics.has_pm2,
-        docs_to_audit: []
-      }
-    };
+    result.setup_needed = true;
+    result.setup_message = 'No nervous-system.config.json found. Run with mode=write to create one and generate a tailored CLAUDE.md for your project.';
+  } else {
+    result.setup_needed = false;
   }
 
   // Step 5: If mode is 'reload' or 'write', write the CLAUDE.md
