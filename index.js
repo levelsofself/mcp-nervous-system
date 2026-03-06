@@ -129,7 +129,7 @@ const MCP_VERSION = '2024-11-05';
 // Server info
 const SERVER_INFO = {
   name: 'nervous-system',
-  version: '1.4.0'
+  version: '1.5.0'
 };
 
 // ============================================================
@@ -138,7 +138,7 @@ const SERVER_INFO = {
 
 const FRAMEWORK = {
   name: 'The Nervous System',
-  version: '1.4.0',
+  version: '1.5.0',
   author: 'Arthur Palyan',
   tagline: 'Anthropic built the brain. Arthur built the nervous system that keeps it from hurting itself.',
   problem: 'LLMs lose context between sessions, loop on problems instead of dispatching, silently fail without progress notes, edit protected files, drift from the real problem, and solve instead of asking.',
@@ -616,6 +616,27 @@ const TOOLS = [
         }
       }
     }
+  },
+  // NEW: Security Audit
+  {
+    name: 'security_audit',
+    annotations: { title: 'Security Audit', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Scans for security vulnerabilities - hardcoded passwords in HTML, exposed API keys, missing TLS, missing rate limiting, exposed bot tokens, and insecure file permissions.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  // NEW: Auto Propagate
+  {
+    name: 'auto_propagate',
+    annotations: { title: 'Auto Propagate', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Runs all 3 propagators (role, version, content) and reports what changed vs what was already current. Ensures all downstream files match source-of-truth values.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  // NEW: Session Close
+  {
+    name: 'session_close',
+    annotations: { title: 'Session Close', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    description: 'One-call session close. Runs drift_audit scope=full, then all 3 propagators. Returns combined results. The end-of-session button.',
+    inputSchema: { type: 'object', properties: {} }
   }
 ];
 
@@ -976,7 +997,7 @@ function auditWebsite() {
   // Source of truth values
   const pkgFile = '/root/github-repos/mcp-nervous-system/package.json';
   const pkg = safeReadJSON(pkgFile);
-  const expectedVersion = pkg ? pkg.version : '1.4.0';
+  const expectedVersion = pkg ? pkg.version : '1.5.0';
   const actualToolCount = TOOLS.length;
   const actualResourceCount = RESOURCES.length;
 
@@ -1185,6 +1206,177 @@ function runDriftAudit(scope) {
 }
 
 // ============================================================
+// SECURITY AUDIT ENGINE
+// ============================================================
+
+function runSecurityAudit() {
+  const vulnerabilities = [];
+  let checksPassed = 0;
+
+  // 1. Scan HTML files for hardcoded passwords/secrets
+  const htmlDir = '/root/family-home/';
+  const secretPatterns = [
+    /Liarzhek1\$/g,
+    /Levelsofself1\$/g,
+    /\d{10}:AA[A-Za-z0-9_-]{30,}/g,
+    /sk-ant-[a-zA-Z0-9_-]+/g,
+    /npm_[A-Za-z0-9]{20,}/g,
+    /ghp_[A-Za-z0-9]{20,}/g,
+    /BOT_TOKEN\s*[:=]\s*['"][^'"]+['"]/gi,
+    /PAPA_FULL\s*[:=]\s*['"][^'"]+['"]/gi,
+    /PAPA_READ\s*[:=]\s*['"][^'"]+['"]/gi
+  ];
+  try {
+    const htmlFiles = fs.readdirSync(htmlDir).filter(f => f.endsWith('.html'));
+    for (const hf of htmlFiles) {
+      const content = safeReadFile(htmlDir + hf);
+      if (!content) continue;
+      let fileClean = true;
+      for (const pat of secretPatterns) {
+        pat.lastIndex = 0;
+        const matches = content.match(pat);
+        if (matches && matches.length > 0) {
+          vulnerabilities.push({ type: 'hardcoded_secret', file: hf, pattern: pat.source, count: matches.length });
+          fileClean = false;
+        }
+      }
+      if (fileClean) checksPassed++;
+    }
+  } catch (e) {
+    vulnerabilities.push({ type: 'scan_error', file: 'html_scan', detail: e.message });
+  }
+
+  // 2. Check auth endpoints use server-side validation
+  const serverContent = safeReadFile('/root/family-home/server.js');
+  if (serverContent) {
+    if (serverContent.includes('getSessionFromReq') || serverContent.includes('getAccessLevel')) {
+      checksPassed++;
+    } else {
+      vulnerabilities.push({ type: 'missing_server_auth', file: 'server.js', detail: 'No server-side auth validation found' });
+    }
+  }
+
+  // 3. Verify GUEST_HIDDEN_FILES covers sensitive files
+  if (serverContent) {
+    const sensitiveFiles = ['api-credentials.json', 'family-roles.json', 'system-config.json', 'llm-providers.json'];
+    for (const sf of sensitiveFiles) {
+      if (serverContent.includes('"' + sf + '"') || serverContent.includes("'" + sf + "'")) {
+        checksPassed++;
+      } else {
+        vulnerabilities.push({ type: 'unhidden_sensitive_file', file: sf, detail: 'Not in GUEST_HIDDEN_FILES' });
+      }
+    }
+  }
+
+  // 4. Check Caddy TLS
+  const caddyContent = safeReadFile('/etc/caddy/Caddyfile');
+  if (caddyContent) {
+    if (caddyContent.includes('tls') || caddyContent.includes('https://') || caddyContent.includes('100levelup.com')) {
+      checksPassed++;
+    } else {
+      vulnerabilities.push({ type: 'missing_tls', file: 'Caddyfile', detail: 'No TLS configuration found' });
+    }
+  }
+
+  // 5. Check bridge rate limiting
+  if (serverContent && serverContent.includes('rate') || fs.existsSync('/root/rate-limit.js') || fs.existsSync('/root/bridge-ratelimit.js')) {
+    checksPassed++;
+  } else {
+    vulnerabilities.push({ type: 'missing_rate_limit', file: 'bridge', detail: 'No rate limiting found for bridge' });
+  }
+
+  // 6. Check bot tokens not in public HTML
+  try {
+    const htmlFiles = fs.readdirSync(htmlDir).filter(f => f.endsWith('.html'));
+    let tokenFound = false;
+    for (const hf of htmlFiles) {
+      const content = safeReadFile(htmlDir + hf);
+      if (!content) continue;
+      const tokenMatch = content.match(/\d{10}:AA[A-Za-z0-9_-]{30,}/g);
+      if (tokenMatch) {
+        vulnerabilities.push({ type: 'exposed_bot_token', file: hf, count: tokenMatch.length });
+        tokenFound = true;
+      }
+    }
+    if (!tokenFound) checksPassed++;
+  } catch (e) {}
+
+  // 7. Check api-credentials.json permissions
+  try {
+    const credFile = '/root/family-data/api-credentials.json';
+    if (fs.existsSync(credFile)) {
+      const stats = fs.statSync(credFile);
+      const mode = (stats.mode & 0o777).toString(8);
+      if (mode === '600') {
+        checksPassed++;
+      } else {
+        vulnerabilities.push({ type: 'insecure_permissions', file: 'api-credentials.json', detail: 'Mode is ' + mode + ', should be 600' });
+      }
+    } else {
+      checksPassed++; // No creds file = no risk
+    }
+  } catch (e) {}
+
+  // 8. Check for Telegram tokens, API keys, npm tokens in family-home
+  try {
+    const allFiles = fs.readdirSync(htmlDir);
+    const dangerPatterns = [
+      { name: 'telegram_token', pat: /\d{10}:AA[A-Za-z0-9_-]{30,}/g },
+      { name: 'anthropic_key', pat: /sk-ant-[a-zA-Z0-9_-]{20,}/g },
+      { name: 'npm_token', pat: /npm_[A-Za-z0-9]{20,}/g }
+    ];
+    for (const f of allFiles) {
+      if (f.endsWith('.html') || f.endsWith('.js') || f.endsWith('.json')) {
+        const content = safeReadFile(htmlDir + f);
+        if (!content) continue;
+        for (const dp of dangerPatterns) {
+          dp.pat.lastIndex = 0;
+          const m = content.match(dp.pat);
+          if (m) {
+            vulnerabilities.push({ type: 'exposed_' + dp.name, file: f, count: m.length });
+          }
+        }
+      }
+    }
+    checksPassed++;
+  } catch (e) {}
+
+  return {
+    status: vulnerabilities.length === 0 ? 'secure' : 'vulnerabilities_found',
+    vulnerability_count: vulnerabilities.length,
+    checks_passed: checksPassed,
+    vulnerabilities
+  };
+}
+
+// ============================================================
+// AUTO PROPAGATE ENGINE
+// ============================================================
+
+function runAutoPropagators() {
+  const results = [];
+  const scripts = [
+    { name: 'role', path: '/root/family-workers/role-propagator.js' },
+    { name: 'version', path: '/root/family-workers/version-propagator.js' },
+    { name: 'content', path: '/root/family-workers/content-propagator.js' }
+  ];
+  for (const script of scripts) {
+    try {
+      const out = execSync('node ' + script.path + ' 2>&1', { timeout: 15000 }).toString();
+      const current = out.indexOf('Already current') !== -1;
+      results.push({ propagator: script.name, status: current ? 'current' : 'updated', output: out.trim().substring(0, 500) });
+    } catch (e) {
+      results.push({ propagator: script.name, status: 'error', error: e.message.substring(0, 200) });
+    }
+  }
+  return {
+    timestamp: new Date().toISOString(),
+    propagators_run: results.length,
+    results
+  };
+}
+
+// ============================================================
 // Handle tool calls
 // ============================================================
 function handleToolCall(name, args) {
@@ -1284,6 +1476,25 @@ function handleToolCall(name, args) {
     case 'drift_audit': {
       const scope = args.scope || 'full';
       return runDriftAudit(scope);
+    }
+
+    case 'security_audit': {
+      return runSecurityAudit();
+    }
+
+    case 'auto_propagate': {
+      return runAutoPropagators();
+    }
+
+    case 'session_close': {
+      const driftResult = runDriftAudit('full');
+      const propagateResult = runAutoPropagators();
+      return {
+        timestamp: new Date().toISOString(),
+        drift_audit: driftResult,
+        propagation: propagateResult,
+        summary: driftResult.drift_count === 0 ? 'Session clean - no drifts, propagators run' : `${driftResult.drift_count} drifts found - review before closing`
+      };
     }
 
     default:
@@ -1407,7 +1618,7 @@ const server = http.createServer((req, res) => {
   // Health check
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.4.0', protocol: MCP_VERSION }));
+    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.5.0', protocol: MCP_VERSION }));
     return;
   }
 
@@ -1524,7 +1735,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       name: 'The Nervous System MCP Server',
-      version: '1.4.0',
+      version: '1.5.0',
       protocol: MCP_VERSION,
       description: 'LLM behavioral enforcement framework. 7 core rules, preflight checks, session handoffs, worklogs, violation logging, kill switch, hash-chained audit, and forced reflection cycles. Built by Arthur Palyan.',
       endpoints: {
@@ -1546,7 +1757,7 @@ const server = http.createServer((req, res) => {
 migrateExistingViolations();
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.error(`[MCP Server] Nervous System v1.4.0 running on port ${PORT}`);
+  console.error(`[MCP Server] Nervous System v1.5.0 running on port ${PORT}`);
   console.error(`[MCP Server] SSE: /sse | HTTP: /mcp | Health: /health | Kill: POST /kill | Audit: GET /audit/verify | Dispatches: GET /dispatches`);
   console.error(`[MCP Server] Protocol: ${MCP_VERSION}`);
   console.error(`[MCP Server] Tools: ${TOOLS.length} (including kill switch, audit chain, dispatch, drift audit)`);
