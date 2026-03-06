@@ -151,7 +151,7 @@ function getFreeMB() {
   } catch (e) { return 0; }
 }
 
-function dispatchToLLM(task, maxTurns) {
+function dispatchToLLM(task, maxTurns, permissions) {
   cleanupDispatches();
   const active = activeDispatches.filter(d => d.status === 'active');
   if (active.length >= MAX_CONCURRENT_DISPATCHES)
@@ -161,6 +161,18 @@ function dispatchToLLM(task, maxTurns) {
   const ts = Date.now();
   const logFile = projectPath('logs_dir') ? `${projectPath('logs_dir')}/dispatch-${ts}.log` : path.join(os.homedir(), '.nervous-system', `dispatch-${ts}.log`);
   const turns = maxTurns || 15;
+  // Write task-level permissions if provided
+  if (permissions && Array.isArray(permissions) && permissions.length > 0) {
+    try {
+      const permData = {
+        permissions: permissions.map(function(fp) {
+          return { file: fp, reason: 'Granted via dispatch_to_llm', granted_at: Date.now() / 1000 };
+        })
+      };
+      fs.writeFileSync('/root/family-data/task-permissions.json', JSON.stringify(permData, null, 2));
+    } catch (e) {}
+  }
+
   try {
     const escaped = task.replace(/"/g, '\\"');
     const child = spawn('bash', ['-c',
@@ -180,7 +192,7 @@ const MCP_VERSION = '2024-11-05';
 // Server info
 const SERVER_INFO = {
   name: 'nervous-system',
-  version: '1.7.3'
+  version: '1.7.4'
 };
 
 // ============================================================
@@ -189,7 +201,7 @@ const SERVER_INFO = {
 
 const FRAMEWORK = {
   name: 'The Nervous System',
-  version: '1.7.3',
+  version: '1.7.4',
   author: 'Arthur Palyan',
   tagline: 'Anthropic built the brain. Arthur built the nervous system that keeps it from hurting itself.',
   problem: 'LLMs lose context between sessions, loop on problems instead of dispatching, silently fail without progress notes, edit protected files, drift from the real problem, and solve instead of asking.',
@@ -647,7 +659,8 @@ const TOOLS = [
       type: 'object',
       properties: {
         task: { type: 'string', description: 'Task description for the background agent.' },
-        max_turns: { type: 'number', description: 'Max turns for the agent. Default: 15.' }
+        max_turns: { type: 'number', description: 'Max turns for the agent. Default: 15.' },
+        permissions: { type: 'array', items: { type: 'string' }, description: 'File paths the agent is allowed to edit (bypasses UNTOUCHABLE for these files). Expires after 24h.' }
       },
       required: ['task']
     }
@@ -1889,7 +1902,7 @@ function handleToolCall(name, args) {
     }
 
     case 'dispatch_to_llm': {
-      return dispatchToLLM(args.task, args.max_turns);
+      return dispatchToLLM(args.task, args.max_turns, args.permissions);
     }
 
     case 'drift_audit': {
@@ -2497,7 +2510,7 @@ const server = http.createServer((req, res) => {
   // Health check
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.7.3', protocol: MCP_VERSION }));
+    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.7.4', protocol: MCP_VERSION }));
     return;
   }
 
@@ -2614,7 +2627,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       name: 'The Nervous System MCP Server',
-      version: '1.7.3',
+      version: '1.7.4',
       protocol: MCP_VERSION,
       description: 'LLM behavioral enforcement framework. 7 core rules, preflight checks, session handoffs, worklogs, violation logging, kill switch, hash-chained audit, and forced reflection cycles. Built by Arthur Palyan.',
       endpoints: {
