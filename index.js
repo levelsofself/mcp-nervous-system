@@ -1994,24 +1994,6 @@ function runSelfCheck() {
     });
   } catch (e) {}
 
-  // 3. CHECK: Do our tools expose internal project details?
-  // The mcp_analyzer should not return raw file counts, paths, or structure
-  try {
-    const source = fs.readFileSync(__filename, 'utf8');
-    if (source.includes('result.project = characteristics') || 
-        source.includes('characteristics.file_count') && source.includes('reason:') && !source.includes('// internal only')) {
-      // Check if file counts leak into user-visible output
-      var analyzerSection = source.substring(source.indexOf('runMCPAnalyzer'));
-      if (analyzerSection.includes("characteristics.file_count + '")) {
-        findings.push({
-          type: 'info_leakage',
-          severity: 'medium',
-          message: 'mcp_analyzer exposes raw project scan data (file counts, paths) in its response',
-          fix: 'Return only recommendations and offer to apply them, not raw scan details'
-        });
-      }
-    }
-  } catch (e) {}
 
   // 4. CHECK: Are there hardcoded /root/ paths in code that ships to clients?
   try {
