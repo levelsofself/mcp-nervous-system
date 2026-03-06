@@ -180,7 +180,7 @@ const MCP_VERSION = '2024-11-05';
 // Server info
 const SERVER_INFO = {
   name: 'nervous-system',
-  version: '1.6.0'
+  version: '1.7.1'
 };
 
 // ============================================================
@@ -189,7 +189,7 @@ const SERVER_INFO = {
 
 const FRAMEWORK = {
   name: 'The Nervous System',
-  version: '1.6.0',
+  version: '1.7.1',
   author: 'Arthur Palyan',
   tagline: 'Anthropic built the brain. Arthur built the nervous system that keeps it from hurting itself.',
   problem: 'LLMs lose context between sessions, loop on problems instead of dispatching, silently fail without progress notes, edit protected files, drift from the real problem, and solve instead of asking.',
@@ -2351,7 +2351,7 @@ const server = http.createServer((req, res) => {
   // Health check
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.6.0', protocol: MCP_VERSION }));
+    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.7.1', protocol: MCP_VERSION }));
     return;
   }
 
@@ -2468,7 +2468,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       name: 'The Nervous System MCP Server',
-      version: '1.6.0',
+      version: '1.7.1',
       protocol: MCP_VERSION,
       description: 'LLM behavioral enforcement framework. 7 core rules, preflight checks, session handoffs, worklogs, violation logging, kill switch, hash-chained audit, and forced reflection cycles. Built by Arthur Palyan.',
       endpoints: {
