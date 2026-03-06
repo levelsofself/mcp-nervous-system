@@ -715,6 +715,19 @@ const TOOLS = [
         }
       }
     }
+  },
+  // NEW: MCP Analyzer
+  {
+    name: 'mcp_analyzer',
+    annotations: { title: 'MCP Analyzer', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Analyzes your project structure and generates a tailored CLAUDE.md with the most useful tools for your workflow. Use mode=analyze to see recommendations, mode=write to generate CLAUDE.md, mode=reload to re-scan and update. Turns the NS from generic tools into a trained assistant that knows your project.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['analyze', 'write', 'reload'], description: 'analyze=show recommendations, write=generate CLAUDE.md, reload=re-scan and update CLAUDE.md' },
+        output_path: { type: 'string', description: 'Where to write CLAUDE.md. Defaults to project root.' }
+      }
+    }
   }
 ];
 
@@ -724,7 +737,7 @@ const RESOURCES = [
   { uri: 'nervous-system://quick-start', name: 'Quick Start Guide', description: 'How to implement the nervous system in your own LLM deployment', mimeType: 'text/plain' },
   { uri: 'nervous-system://rules', name: 'The 7 Core Rules', description: 'All 7 behavioral rules with explanations and enforcement', mimeType: 'text/plain' },
   { uri: 'nervous-system://templates', name: 'Templates', description: 'Ready-to-use templates for handoffs, worklogs, preflight, and untouchable lists', mimeType: 'text/plain' },
-  { uri: 'nervous-system://drift-audit', name: 'Drift Audit', description: 'Configuration drift detection - checks roles, versions, file references, and running processes against source-of-truth files', mimeType: 'text/plain' }
+  { uri: 'nervous-system://drift-audit', name: 'Drift Audit', description: 'Configuration drift detection - checks roles, versions, file references, and running processes against source-of-truth files', mimeType: 'text/plain' },
 ];
 
 // ============================================================
@@ -1891,10 +1904,341 @@ function handleToolCall(name, args) {
       return runPrePublishAudit(args.source_file);
     }
 
+    case 'mcp_analyzer': {
+      return runMCPAnalyzer(args.mode, args.output_path);
+    }
+
     default:
       return { error: 'Unknown tool' };
   }
 }
+
+// ============================================================
+// MCP ANALYZER - Analyzes project and generates tailored config
+// ============================================================
+
+function runMCPAnalyzer(mode, outputPath) {
+  const result = {
+    timestamp: new Date().toISOString(),
+    mode: mode || 'analyze',
+    project: {},
+    recommended_tools: [],
+    claude_md: null,
+    config_suggestions: null
+  };
+
+  // Step 1: Detect project characteristics
+  const projectRoot = PROJECT.project_root || process.cwd();
+  const characteristics = {
+    has_config: !!PROJECT._source && PROJECT._source !== 'defaults',
+    has_protected_files: false,
+    has_html_pages: false,
+    has_pm2: PROJECT.pm2_managed || false,
+    has_package_json: false,
+    has_git: false,
+    has_tests: false,
+    has_docs: false,
+    has_data_dir: !!PROJECT.data_dir,
+    has_logs_dir: !!PROJECT.logs_dir,
+    file_count: 0,
+    js_files: 0,
+    py_files: 0,
+    html_files: 0,
+    json_files: 0,
+    md_files: 0,
+    project_type: 'unknown',
+    languages: [],
+    frameworks: []
+  };
+
+  // Scan project root
+  try {
+    const scanDir = function(dir, depth) {
+      if (depth > 3) return;
+      try {
+        const items = fs.readdirSync(dir);
+        for (const item of items) {
+          if (item.startsWith('.') || item === 'node_modules' || item === '__pycache__') continue;
+          const fullPath = path.join(dir, item);
+          try {
+            const stat = fs.statSync(fullPath);
+            if (stat.isDirectory()) {
+              if (item === 'test' || item === 'tests' || item === '__tests__') characteristics.has_tests = true;
+              if (item === 'docs' || item === 'documentation') characteristics.has_docs = true;
+              if (item === 'public' || item === 'static' || item === 'html') characteristics.has_html_pages = true;
+              scanDir(fullPath, depth + 1);
+            } else {
+              characteristics.file_count++;
+              if (item.endsWith('.js') || item.endsWith('.ts')) characteristics.js_files++;
+              if (item.endsWith('.py')) characteristics.py_files++;
+              if (item.endsWith('.html')) characteristics.html_files++;
+              if (item.endsWith('.json')) characteristics.json_files++;
+              if (item.endsWith('.md')) characteristics.md_files++;
+              if (item === 'package.json') characteristics.has_package_json = true;
+              if (item === '.gitignore' || item === '.git') characteristics.has_git = true;
+              if (item === 'CLAUDE.md' || item === 'claude.md') characteristics.has_docs = true;
+            }
+          } catch (e) {}
+        }
+      } catch (e) {}
+    };
+    scanDir(projectRoot, 0);
+  } catch (e) {}
+
+  // Check for protected files list
+  const protectedPath = projectPath('protected_files_list');
+  if (protectedPath) {
+    try {
+      const content = fs.readFileSync(protectedPath, 'utf8');
+      const lines = content.split('\n').filter(l => l.trim() && !l.trim().startsWith('#'));
+      characteristics.has_protected_files = lines.length > 0;
+      characteristics.protected_count = lines.length;
+    } catch (e) {}
+  }
+
+  // Check for git
+  try {
+    if (fs.existsSync(path.join(projectRoot, '.git'))) characteristics.has_git = true;
+  } catch (e) {}
+
+  // Check for PM2
+  if (!characteristics.has_pm2) {
+    try {
+      const { execSync } = require('child_process');
+      execSync('pm2 jlist 2>/dev/null', { timeout: 5000 });
+      characteristics.has_pm2 = true;
+    } catch (e) {}
+  }
+
+  // Determine project type
+  if (characteristics.js_files > 0) characteristics.languages.push('javascript');
+  if (characteristics.py_files > 0) characteristics.languages.push('python');
+
+  if (characteristics.has_pm2 && characteristics.js_files > 5) {
+    characteristics.project_type = 'production_system';
+  } else if (characteristics.has_html_pages && characteristics.js_files > 0) {
+    characteristics.project_type = 'web_application';
+  } else if (characteristics.has_package_json && characteristics.js_files > 0) {
+    characteristics.project_type = 'node_project';
+  } else if (characteristics.py_files > 0) {
+    characteristics.project_type = 'python_project';
+  } else if (characteristics.md_files > 2) {
+    characteristics.project_type = 'documentation';
+  } else {
+    characteristics.project_type = 'general';
+  }
+
+  result.project = characteristics;
+
+  // Step 2: Recommend tools based on project type
+  const recommendations = [];
+
+  // Universal tools everyone needs
+  recommendations.push({
+    tool: 'get_framework',
+    priority: 'essential',
+    reason: 'Core behavioral rules. Read this first to understand how the NS works.'
+  });
+  recommendations.push({
+    tool: 'preflight_check',
+    priority: 'essential',
+    reason: 'Protects critical files from accidental edits. Set up your protected files list.'
+  });
+  recommendations.push({
+    tool: 'worklog',
+    priority: 'essential',
+    reason: 'Prevents silent failures. Write progress before every action.'
+  });
+  recommendations.push({
+    tool: 'session_handoff',
+    priority: 'essential',
+    reason: 'Solves context loss between sessions. Update the handoff before ending work.'
+  });
+
+  // Conditional tools
+  if (characteristics.has_protected_files || characteristics.file_count > 20) {
+    recommendations.push({
+      tool: 'guardrail_rules',
+      priority: 'high',
+      reason: 'You have ' + (characteristics.protected_count || 'multiple') + ' protected files. These rules enforce discipline.'
+    });
+  }
+
+  if (characteristics.project_type === 'production_system') {
+    recommendations.push({
+      tool: 'drift_audit',
+      priority: 'high',
+      reason: 'Production system detected. Drift audit catches when configs, docs, and running processes go out of sync.'
+    });
+    recommendations.push({
+      tool: 'security_audit',
+      priority: 'high',
+      reason: 'Production system with ' + characteristics.file_count + ' files. Security audit catches exposed secrets and misconfigurations.'
+    });
+    recommendations.push({
+      tool: 'emergency_kill_switch',
+      priority: 'medium',
+      reason: 'Production system with PM2. Kill switch gives you emergency shutdown capability.'
+    });
+    recommendations.push({
+      tool: 'dispatch_to_llm',
+      priority: 'high',
+      reason: 'Complex system. Dispatch heavy tasks to background agents instead of blocking your main session.'
+    });
+  }
+
+  if (characteristics.has_pm2) {
+    recommendations.push({
+      tool: 'session_close',
+      priority: 'high',
+      reason: 'PM2 processes detected. Session close runs full audit + propagation before you end work.'
+    });
+  }
+
+  if (characteristics.has_html_pages) {
+    recommendations.push({
+      tool: 'page_health',
+      priority: 'medium',
+      reason: 'HTML pages detected. Page health catches broken links, missing meta tags, and UX issues.'
+    });
+  }
+
+  if (characteristics.has_package_json && characteristics.has_git) {
+    recommendations.push({
+      tool: 'pre_publish_audit',
+      priority: 'high',
+      reason: 'Publishable package detected. Pre-publish audit catches secrets and hardcoded paths before they ship.'
+    });
+  }
+
+  recommendations.push({
+    tool: 'step_back_check',
+    priority: 'medium',
+    reason: 'Forces reflection every few messages. Prevents tunnel vision on details.'
+  });
+
+  recommendations.push({
+    tool: 'verify_audit_chain',
+    priority: 'low',
+    reason: 'Tamper-proof audit trail. Verifies no one has modified the activity log.'
+  });
+
+  // Sort by priority
+  const priorityOrder = { essential: 0, high: 1, medium: 2, low: 3 };
+  recommendations.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+
+  result.recommended_tools = recommendations;
+
+  // Step 3: Generate CLAUDE.md
+  const essentialTools = recommendations.filter(r => r.priority === 'essential').map(r => r.tool);
+  const highTools = recommendations.filter(r => r.priority === 'high').map(r => r.tool);
+  const mediumTools = recommendations.filter(r => r.priority === 'medium').map(r => r.tool);
+
+  let claudeMd = '# CLAUDE.md - Generated by The Nervous System MCP Analyzer\n';
+  claudeMd += '# Project type: ' + characteristics.project_type + '\n';
+  claudeMd += '# Generated: ' + result.timestamp + '\n';
+  claudeMd += '# Re-run: mcp_analyzer mode=reload to refresh\n\n';
+
+  claudeMd += '## BEHAVIORAL RULES\n\n';
+  claudeMd += 'This project uses The Nervous System for LLM behavioral enforcement.\n';
+  claudeMd += 'Before doing anything, internalize these rules:\n\n';
+  claudeMd += '1. DISPATCH DONT DO - If a task takes 2+ messages, write a task file and dispatch it.\n';
+  claudeMd += '2. UNTOUCHABLE = UNTOUCHABLE - Run preflight before ANY file edit. If blocked, STOP.\n';
+  claudeMd += '3. WRITE PROGRESS AS YOU GO - Note what you are about to do before each action.\n';
+  claudeMd += '4. STEP BACK EVERY 4 MESSAGES - Are we solving the real problem?\n';
+  claudeMd += '5. ASK BEFORE TOUCHING - Do not modify configs or processes without permission.\n';
+  claudeMd += '6. HAND OFF EVERY FEW MESSAGES - Update the session handoff file.\n\n';
+
+  if (characteristics.has_protected_files) {
+    claudeMd += '## PROTECTED FILES\n\n';
+    claudeMd += 'This project has a protected files list at: ' + (protectedPath || 'PROTECTED_FILES.txt') + '\n';
+    claudeMd += 'Run preflight_check before editing ANY file. If it is protected, STOP and ask.\n\n';
+  }
+
+  claudeMd += '## YOUR TOOLS (in order of importance)\n\n';
+  claudeMd += '### Always use these:\n';
+  for (const t of essentialTools) {
+    const rec = recommendations.find(r => r.tool === t);
+    claudeMd += '- **' + t + '** - ' + rec.reason + '\n';
+  }
+
+  if (highTools.length > 0) {
+    claudeMd += '\n### Use regularly:\n';
+    for (const t of highTools) {
+      const rec = recommendations.find(r => r.tool === t);
+      claudeMd += '- **' + t + '** - ' + rec.reason + '\n';
+    }
+  }
+
+  if (mediumTools.length > 0) {
+    claudeMd += '\n### Use when relevant:\n';
+    for (const t of mediumTools) {
+      const rec = recommendations.find(r => r.tool === t);
+      claudeMd += '- **' + t + '** - ' + rec.reason + '\n';
+    }
+  }
+
+  claudeMd += '\n## SESSION WORKFLOW\n\n';
+  claudeMd += '1. Start: Read session handoff file to see where the last session left off\n';
+  claudeMd += '2. Work: Write progress before each action. Run preflight before file edits.\n';
+  if (characteristics.has_pm2) {
+    claudeMd += '3. End: Call session_close (runs drift audit + propagators automatically)\n';
+  } else {
+    claudeMd += '3. End: Update the session handoff file with what was done and what is next\n';
+  }
+  claudeMd += '4. Every 4 messages: Call step_back_check to verify direction\n\n';
+
+  if (characteristics.project_type === 'production_system') {
+    claudeMd += '## PRODUCTION RULES\n\n';
+    claudeMd += 'This is a production system. Extra care required:\n';
+    claudeMd += '- Run security_audit after any auth or config changes\n';
+    claudeMd += '- Run drift_audit after any file changes\n';
+    claudeMd += '- Run pre_publish_audit before publishing any packages\n';
+    claudeMd += '- Use dispatch_to_llm for tasks that take 2+ messages\n';
+    claudeMd += '- Kill switch is available for emergencies\n\n';
+  }
+
+  result.claude_md = claudeMd;
+
+  // Step 4: Config suggestions (if no config exists)
+  if (!characteristics.has_config) {
+    result.config_suggestions = {
+      message: 'No nervous-system.config.json found. Create one to enable full audit capabilities.',
+      suggested_config: {
+        project_root: projectRoot,
+        data_dir: path.join(projectRoot, 'data'),
+        logs_dir: path.join(projectRoot, 'logs'),
+        html_dir: characteristics.has_html_pages ? path.join(projectRoot, 'public') : null,
+        protected_files_list: path.join(projectRoot, 'PROTECTED_FILES.txt'),
+        config_file: path.join(projectRoot, 'system-config.json'),
+        pm2_managed: characteristics.has_pm2,
+        docs_to_audit: []
+      }
+    };
+  }
+
+  // Step 5: If mode is 'reload' or 'write', write the CLAUDE.md
+  if ((mode === 'reload' || mode === 'write') && outputPath) {
+    try {
+      fs.writeFileSync(outputPath, claudeMd);
+      result.written_to = outputPath;
+    } catch (e) {
+      result.write_error = e.message;
+    }
+  } else if (mode === 'reload' || mode === 'write') {
+    // Default output path
+    const defaultPath = path.join(projectRoot, 'CLAUDE.md');
+    try {
+      fs.writeFileSync(defaultPath, claudeMd);
+      result.written_to = defaultPath;
+    } catch (e) {
+      result.write_error = e.message;
+    }
+  }
+
+  return result;
+}
+
 
 // Handle resource reads
 function handleResourceRead(uri) {
