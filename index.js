@@ -475,7 +475,7 @@ const NERVOUS_SYSTEM_INFO = {
     ]
   },
   origin_story: {
-    context: 'Arthur Palyan runs a startup with 12 AI family members, each with distinct roles. The entire operation runs on a $12/month VPS with a $300/month LLM subscription.',
+    context: 'Arthur Palyan runs a startup with 12 AI family members, each with distinct roles. The entire operation runs on a $24/month VPS with a $300/month LLM subscription.',
     problem_discovered: 'After months of building, patterns emerged: LLMs would break working systems while trying to improve them. They would loop on debugging instead of dispatching. They would silently fail when sessions timed out. They would lose all context between sessions.',
     solution_built: 'Arthur built the nervous system - not by changing the LLM model, but by wrapping it in behavioral rules enforced through scripts, file checks, and prompt engineering. The LLM itself became the enforcement mechanism, trained to check before acting.',
     philosophy: 'The brain (LLM) is powerful but needs a nervous system to keep it from hurting itself. Just like a human nervous system sends pain signals before you touch a hot stove, this system sends BLOCKED/PROTECTED signals before the LLM edits a critical file.',
