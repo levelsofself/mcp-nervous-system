@@ -1,0 +1,10 @@
+{
+  "project_root": ".",
+  "data_dir": "./data",
+  "logs_dir": "./logs",
+  "html_dir": "./public",
+  "protected_files_list": "./PROTECTED_FILES.txt",
+  "config_file": "./system-config.json",
+  "pm2_managed": false,
+  "docs_to_audit": []
+}
