@@ -129,7 +129,7 @@ const MCP_VERSION = '2024-11-05';
 // Server info
 const SERVER_INFO = {
   name: 'nervous-system',
-  version: '1.1.0'
+  version: '1.4.0'
 };
 
 // ============================================================
@@ -138,7 +138,7 @@ const SERVER_INFO = {
 
 const FRAMEWORK = {
   name: 'The Nervous System',
-  version: '1.1.0',
+  version: '1.4.0',
   author: 'Arthur Palyan',
   tagline: 'Anthropic built the brain. Arthur built the nervous system that keeps it from hurting itself.',
   problem: 'LLMs lose context between sessions, loop on problems instead of dispatching, silently fail without progress notes, edit protected files, drift from the real problem, and solve instead of asking.',
@@ -600,6 +600,22 @@ const TOOLS = [
       },
       required: ['task']
     }
+  },
+  // NEW: Drift Audit
+  {
+    name: 'drift_audit',
+    annotations: { title: 'Configuration Drift Audit', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Scans for configuration drift - finds files, docs, and configs that reference outdated values. Detects when a file is renamed but references are not updated, when roles change but downstream docs still show old values, or when running processes do not match documentation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['full', 'roles', 'versions', 'files', 'processes', 'website'],
+          description: 'What to audit. full=everything, roles=family role consistency, versions=NS version numbers, files=file reference integrity, processes=PM2 vs docs, website=HTML pages and configs for stale values'
+        }
+      }
+    }
   }
 ];
 
@@ -608,8 +624,565 @@ const RESOURCES = [
   { uri: 'nervous-system://framework', name: 'The Nervous System Framework', description: 'Complete behavioral enforcement framework for LLM management', mimeType: 'text/plain' },
   { uri: 'nervous-system://quick-start', name: 'Quick Start Guide', description: 'How to implement the nervous system in your own LLM deployment', mimeType: 'text/plain' },
   { uri: 'nervous-system://rules', name: 'The 7 Core Rules', description: 'All 7 behavioral rules with explanations and enforcement', mimeType: 'text/plain' },
-  { uri: 'nervous-system://templates', name: 'Templates', description: 'Ready-to-use templates for handoffs, worklogs, preflight, and untouchable lists', mimeType: 'text/plain' }
+  { uri: 'nervous-system://templates', name: 'Templates', description: 'Ready-to-use templates for handoffs, worklogs, preflight, and untouchable lists', mimeType: 'text/plain' },
+  { uri: 'nervous-system://drift-audit', name: 'Drift Audit', description: 'Configuration drift detection - checks roles, versions, file references, and running processes against source-of-truth files', mimeType: 'text/plain' }
 ];
+
+// ============================================================
+// DRIFT AUDIT ENGINE
+// ============================================================
+
+const { execSync } = require('child_process');
+
+function safeReadJSON(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+function safeReadFile(filePath) {
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch (e) {
+    return null;
+  }
+}
+
+function auditRoles() {
+  const drifts = [];
+  let cleanChecks = 0;
+  const rolesFile = '/root/family-data/family-roles.json';
+  const roles = safeReadJSON(rolesFile);
+  if (!roles || !roles.members) {
+    drifts.push({ type: 'missing_source', source: rolesFile, target: '', field: '', expected: 'valid JSON with members array', found: 'missing or invalid' });
+    return { drifts, cleanChecks };
+  }
+
+  const sourceRoles = {};
+  for (const m of roles.members) {
+    sourceRoles[m.id] = { name: m.name, aka: m.aka, role: m.role };
+  }
+
+  // Check family-status.json
+  const statusFile = '/root/family-data/family-status.json';
+  const status = safeReadJSON(statusFile);
+  if (status && status.members) {
+    for (const m of status.members) {
+      const src = sourceRoles[m.id];
+      if (!src) continue;
+      if (m.aka && m.aka !== src.aka) {
+        drifts.push({ type: 'role_mismatch', source: 'family-roles.json', target: 'family-status.json', field: `${m.id}.aka`, expected: src.aka, found: m.aka });
+      } else { cleanChecks++; }
+      if (m.role && m.role !== src.role) {
+        drifts.push({ type: 'role_mismatch', source: 'family-roles.json', target: 'family-status.json', field: `${m.id}.role`, expected: src.role, found: m.role });
+      } else { cleanChecks++; }
+    }
+  }
+
+  // Check system-config.json
+  const configFile = '/root/family-data/system-config.json';
+  const config = safeReadJSON(configFile);
+  if (config && config.family_members) {
+    for (const m of config.family_members) {
+      const src = sourceRoles[m.id];
+      if (!src) continue;
+      if (m.aka && m.aka !== src.aka) {
+        drifts.push({ type: 'role_mismatch', source: 'family-roles.json', target: 'system-config.json', field: `${m.id}.aka`, expected: src.aka, found: m.aka });
+      } else { cleanChecks++; }
+      if (m.role && m.role !== src.role) {
+        drifts.push({ type: 'role_mismatch', source: 'family-roles.json', target: 'system-config.json', field: `${m.id}.role`, expected: src.role, found: m.role });
+      } else { cleanChecks++; }
+    }
+  }
+
+  // Check family-guide.json
+  const guideFile = '/root/family-data/family-guide.json';
+  const guide = safeReadJSON(guideFile);
+  if (guide && guide.members) {
+    for (const m of guide.members) {
+      const src = sourceRoles[m.id];
+      if (!src) continue;
+      if (m.aka && m.aka !== src.aka) {
+        drifts.push({ type: 'role_mismatch', source: 'family-roles.json', target: 'family-guide.json', field: `${m.id}.aka`, expected: src.aka, found: m.aka });
+      } else { cleanChecks++; }
+      if (m.role && m.role !== src.role) {
+        drifts.push({ type: 'role_mismatch', source: 'family-roles.json', target: 'family-guide.json', field: `${m.id}.role`, expected: src.role, found: m.role });
+      } else { cleanChecks++; }
+    }
+  }
+
+  // Check HTML files for role references
+  const htmlFiles = [
+    { path: '/root/family-home/index.html', name: 'index.html' },
+    { path: '/root/family-home/explorer.html', name: 'explorer.html' },
+    { path: '/root/family-home/meet.html', name: 'meet.html' }
+  ];
+  for (const hf of htmlFiles) {
+    const content = safeReadFile(hf.path);
+    if (!content) continue;
+    for (const [id, src] of Object.entries(sourceRoles)) {
+      if (content.includes(src.name)) { cleanChecks++; }
+    }
+  }
+
+  // Check mcp-ops-server.js
+  const opsContent = safeReadFile('/root/mcp-ops-server.js');
+  if (opsContent) {
+    for (const [id, src] of Object.entries(sourceRoles)) {
+      if (opsContent.includes(`"${src.aka}"`) || opsContent.includes(`'${src.aka}'`)) {
+        cleanChecks++;
+      }
+    }
+  }
+
+  return { drifts, cleanChecks };
+}
+
+function auditVersions() {
+  const drifts = [];
+  let cleanChecks = 0;
+  const pkgFile = '/root/github-repos/mcp-nervous-system/package.json';
+  const pkg = safeReadJSON(pkgFile);
+  const expectedVersion = pkg ? pkg.version : null;
+  if (!expectedVersion) {
+    drifts.push({ type: 'missing_source', source: pkgFile, target: '', field: 'version', expected: 'valid version', found: 'missing' });
+    return { drifts, cleanChecks };
+  }
+
+  // Check SERVER_INFO.version and FRAMEWORK.version in index.js
+  const indexContent = safeReadFile('/root/github-repos/mcp-nervous-system/index.js');
+  if (indexContent) {
+    const siMatch = indexContent.match(/SERVER_INFO\s*=\s*\{[^}]*version:\s*'([^']+)'/);
+    if (siMatch) {
+      if (siMatch[1] !== expectedVersion) {
+        drifts.push({ type: 'version_mismatch', source: 'package.json', target: 'index.js SERVER_INFO', field: 'version', expected: expectedVersion, found: siMatch[1] });
+      } else { cleanChecks++; }
+    }
+    const fwMatch = indexContent.match(/FRAMEWORK\s*=\s*\{[^}]*version:\s*'([^']+)'/);
+    if (fwMatch) {
+      if (fwMatch[1] !== expectedVersion) {
+        drifts.push({ type: 'version_mismatch', source: 'package.json', target: 'index.js FRAMEWORK', field: 'version', expected: expectedVersion, found: fwMatch[1] });
+      } else { cleanChecks++; }
+    }
+    // Check health endpoint version
+    const healthMatch = indexContent.match(/version:\s*'([^']+)'.*?service:\s*'nervous-system/);
+    if (!healthMatch) {
+      const healthMatch2 = indexContent.match(/service:\s*'nervous-system-mcp',\s*version:\s*'([^']+)'/);
+      if (healthMatch2) {
+        if (healthMatch2[1] !== expectedVersion) {
+          drifts.push({ type: 'version_mismatch', source: 'package.json', target: 'index.js health endpoint', field: 'version', expected: expectedVersion, found: healthMatch2[1] });
+        } else { cleanChecks++; }
+      }
+    }
+    // Check startup log version
+    const startupMatch = indexContent.match(/Nervous System v([0-9.]+) running/);
+    if (startupMatch) {
+      if (startupMatch[1] !== expectedVersion) {
+        drifts.push({ type: 'version_mismatch', source: 'package.json', target: 'index.js startup log', field: 'version', expected: expectedVersion, found: startupMatch[1] });
+      } else { cleanChecks++; }
+    }
+    // Check root endpoint version
+    const rootMatch = indexContent.match(/name:\s*'The Nervous System MCP Server'[\s\S]*?version:\s*'([^']+)'/);
+    if (rootMatch) {
+      if (rootMatch[1] !== expectedVersion) {
+        drifts.push({ type: 'version_mismatch', source: 'package.json', target: 'index.js root endpoint', field: 'version', expected: expectedVersion, found: rootMatch[1] });
+      } else { cleanChecks++; }
+    }
+  }
+
+  // Check BUSINESS_BUILDER.md
+  const bbContent = safeReadFile('/root/family-data/BUSINESS_BUILDER.md');
+  if (bbContent) {
+    const bbMatch = bbContent.match(/[Nn]ervous [Ss]ystem.*?v?(\d+\.\d+\.\d+)/);
+    if (bbMatch && bbMatch[1] !== expectedVersion) {
+      drifts.push({ type: 'version_mismatch', source: 'package.json', target: 'BUSINESS_BUILDER.md', field: 'ns_version', expected: expectedVersion, found: bbMatch[1] });
+    } else if (bbMatch) { cleanChecks++; }
+  }
+
+  // Check gateway.html
+  const gwContent = safeReadFile('/root/family-home/gateway.html');
+  if (gwContent) {
+    const gwMatch = gwContent.match(/[Vv]ersion[:\s]*v?(\d+\.\d+\.\d+)/);
+    if (gwMatch && gwMatch[1] !== expectedVersion) {
+      drifts.push({ type: 'version_mismatch', source: 'package.json', target: 'gateway.html', field: 'version', expected: expectedVersion, found: gwMatch[1] });
+    } else if (gwMatch) { cleanChecks++; }
+  }
+
+  // Check README.md
+  const readmeContent = safeReadFile('/root/github-repos/mcp-nervous-system/README.md');
+  if (readmeContent) {
+    const rmMatch = readmeContent.match(/[Vv]ersion[:\s]*v?(\d+\.\d+\.\d+)/);
+    if (rmMatch && rmMatch[1] !== expectedVersion) {
+      drifts.push({ type: 'version_mismatch', source: 'package.json', target: 'README.md', field: 'version', expected: expectedVersion, found: rmMatch[1] });
+    } else if (rmMatch) { cleanChecks++; }
+  }
+
+  // Check family-roles.json stats
+  const roles = safeReadJSON('/root/family-data/family-roles.json');
+  if (roles && roles.stats) {
+    if (roles.stats.ns_version && roles.stats.ns_version !== expectedVersion) {
+      drifts.push({ type: 'version_mismatch', source: 'package.json', target: 'family-roles.json', field: 'stats.ns_version', expected: expectedVersion, found: roles.stats.ns_version });
+    } else if (roles.stats.ns_version) { cleanChecks++; }
+
+    // Check tool count
+    const actualToolCount = TOOLS.length;
+    if (roles.stats.ns_tools && roles.stats.ns_tools !== actualToolCount) {
+      drifts.push({ type: 'tool_count_mismatch', source: 'TOOLS array', target: 'family-roles.json', field: 'stats.ns_tools', expected: String(actualToolCount), found: String(roles.stats.ns_tools) });
+    } else if (roles.stats.ns_tools) { cleanChecks++; }
+  }
+
+  return { drifts, cleanChecks };
+}
+
+function auditFiles() {
+  const drifts = [];
+  let cleanChecks = 0;
+
+  // Check UNTOUCHABLE_FILES.txt - verify each file exists
+  const untouchableContent = safeReadFile('/root/family-data/UNTOUCHABLE_FILES.txt');
+  if (untouchableContent) {
+    const lines = untouchableContent.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+    for (const filePath of lines) {
+      if (fs.existsSync(filePath)) {
+        cleanChecks++;
+      } else {
+        drifts.push({ type: 'missing_file', source: 'UNTOUCHABLE_FILES.txt', target: filePath, field: 'exists', expected: 'true', found: 'false' });
+      }
+    }
+  }
+
+  // Check LLM_STARTUP.md and BUSINESS_BUILDER.md for file references
+  const docsToCheck = [
+    { path: '/root/family-data/LLM_STARTUP.md', name: 'LLM_STARTUP.md' },
+    { path: '/root/family-data/BUSINESS_BUILDER.md', name: 'BUSINESS_BUILDER.md' }
+  ];
+
+  // Get PM2 running scripts
+  let pm2Scripts = {};
+  try {
+    const pm2Output = execSync('pm2 jlist', { timeout: 10000 }).toString();
+    const pm2List = JSON.parse(pm2Output);
+    for (const proc of pm2List) {
+      pm2Scripts[proc.name] = proc.pm2_env ? proc.pm2_env.pm_exec_path : (proc.script || '');
+    }
+  } catch (e) {}
+
+  for (const doc of docsToCheck) {
+    const content = safeReadFile(doc.path);
+    if (!content) continue;
+    // Look for .js file references
+    const jsRefs = content.match(/\/root\/[^\s)]+\.js/g) || [];
+    for (const ref of jsRefs) {
+      if (fs.existsSync(ref)) {
+        cleanChecks++;
+        // Check if PM2 is running something different
+        const basename = ref.split('/').pop();
+        for (const [procName, scriptPath] of Object.entries(pm2Scripts)) {
+          const procBasename = scriptPath.split('/').pop();
+          // If the doc references a versioned file like tamara-v5.js but PM2 runs tamara-v6.js
+          const refBase = basename.replace(/-v\d+/, '');
+          const procBase = procBasename.replace(/-v\d+/, '');
+          if (refBase === procBase && basename !== procBasename && ref !== scriptPath) {
+            drifts.push({ type: 'file_version_mismatch', source: doc.name, target: `PM2 process ${procName}`, field: refBase, expected: basename, found: procBasename });
+          }
+        }
+      } else {
+        drifts.push({ type: 'missing_file_ref', source: doc.name, target: ref, field: 'exists', expected: 'true', found: 'false' });
+      }
+    }
+  }
+
+  // Check system-config.json syntax_check_scripts
+  const config = safeReadJSON('/root/family-data/system-config.json');
+  if (config && config.syntax_check_scripts) {
+    for (const script of config.syntax_check_scripts) {
+      if (fs.existsSync(script)) {
+        cleanChecks++;
+      } else {
+        drifts.push({ type: 'missing_file', source: 'system-config.json syntax_check_scripts', target: script, field: 'exists', expected: 'true', found: 'false' });
+      }
+    }
+  }
+
+  return { drifts, cleanChecks };
+}
+
+function auditProcesses() {
+  const drifts = [];
+  let cleanChecks = 0;
+
+  let pm2Procs = [];
+  try {
+    const pm2Output = execSync('pm2 jlist', { timeout: 10000 }).toString();
+    pm2Procs = JSON.parse(pm2Output);
+  } catch (e) {
+    drifts.push({ type: 'pm2_error', source: 'pm2 jlist', target: '', field: '', expected: 'valid pm2 output', found: e.message });
+    return { drifts, cleanChecks };
+  }
+
+  const config = safeReadJSON('/root/family-data/system-config.json');
+  if (!config || !config.processes) {
+    // Try to compare against family-roles.json procs
+    const roles = safeReadJSON('/root/family-data/family-roles.json');
+    if (roles && roles.members) {
+      const expectedProcs = [];
+      for (const m of roles.members) {
+        if (m.procs) expectedProcs.push(...m.procs);
+      }
+      const runningNames = pm2Procs.map(p => p.name);
+      for (const ep of expectedProcs) {
+        if (runningNames.includes(ep)) {
+          cleanChecks++;
+        } else {
+          drifts.push({ type: 'missing_process', source: 'family-roles.json', target: 'pm2', field: ep, expected: 'running', found: 'not found in pm2' });
+        }
+      }
+    }
+    return { drifts, cleanChecks };
+  }
+
+  // Compare config.processes against pm2
+  const runningNames = pm2Procs.map(p => p.name);
+  if (Array.isArray(config.processes)) {
+    for (const ep of config.processes) {
+      const procName = typeof ep === 'string' ? ep : ep.name;
+      if (runningNames.includes(procName)) {
+        cleanChecks++;
+      } else {
+        drifts.push({ type: 'missing_process', source: 'system-config.json', target: 'pm2', field: procName, expected: 'running', found: 'not found in pm2' });
+      }
+    }
+  }
+
+  // Check script paths match
+  for (const proc of pm2Procs) {
+    const scriptPath = proc.pm2_env ? proc.pm2_env.pm_exec_path : '';
+    if (scriptPath && !fs.existsSync(scriptPath)) {
+      drifts.push({ type: 'broken_script_path', source: `pm2 process ${proc.name}`, target: scriptPath, field: 'exists', expected: 'true', found: 'false' });
+    } else if (scriptPath) {
+      cleanChecks++;
+    }
+  }
+
+  return { drifts, cleanChecks };
+}
+
+function auditWebsite() {
+  const drifts = [];
+  let cleanChecks = 0;
+
+  // Source of truth values
+  const pkgFile = '/root/github-repos/mcp-nervous-system/package.json';
+  const pkg = safeReadJSON(pkgFile);
+  const expectedVersion = pkg ? pkg.version : '1.4.0';
+  const actualToolCount = TOOLS.length;
+  const actualResourceCount = RESOURCES.length;
+
+  const roles = safeReadJSON('/root/family-data/family-roles.json');
+  const expectedMemberCount = roles && roles.stats ? roles.stats.member_count : 11;
+  const expectedProcessCount = roles && roles.stats ? roles.stats.process_count : 28;
+
+  // Count protected files (non-comment, non-blank lines starting with /)
+  const untouchableContent = safeReadFile('/root/family-data/UNTOUCHABLE_FILES.txt');
+  let protectedFileCount = 0;
+  if (untouchableContent) {
+    protectedFileCount = untouchableContent.split('\n').filter(l => l.trim() && !l.trim().startsWith('#') && l.trim().startsWith('/')).length;
+  }
+
+  // Get role names from family-roles.json
+  const roleNames = roles && roles.members ? roles.members.map(m => m.name) : [];
+
+  // 1. Check all .html files in /root/family-home/
+  const familyHomeDir = '/root/family-home/';
+  let htmlFiles = [];
+  try {
+    htmlFiles = fs.readdirSync(familyHomeDir).filter(f => f.endsWith('.html')).map(f => familyHomeDir + f);
+  } catch (e) {}
+
+  for (const htmlFile of htmlFiles) {
+    const content = safeReadFile(htmlFile);
+    if (!content) continue;
+    const fname = htmlFile.split('/').pop();
+
+    // Check for old version references (not matching expected)
+    const versionMatches = content.match(/v(\d+\.\d+\.\d+)/g) || [];
+    for (const vm of versionMatches) {
+      const ver = vm.substring(1);
+      if (ver !== expectedVersion && /^1\.\d+\.\d+$/.test(ver)) {
+        drifts.push({ type: 'stale_version', source: 'package.json', target: fname, field: 'version', expected: expectedVersion, found: ver });
+      }
+    }
+
+    // Check for stale tool count references
+    const toolCountMatches = content.match(/(\d+)\s*(?:MCP\s+)?tools/gi) || [];
+    for (const tcm of toolCountMatches) {
+      const num = parseInt(tcm);
+      if (num > 0 && num !== actualToolCount && num < 50) {
+        drifts.push({ type: 'stale_tool_count', source: 'TOOLS array', target: fname, field: 'tool_count', expected: String(actualToolCount), found: String(num) });
+      }
+    }
+
+    // Check for stale agent/member count
+    const agentMatches = content.match(/(\d+)\s*(?:AI\s+)?(?:family\s+)?(?:members|agents)/gi) || [];
+    for (const am of agentMatches) {
+      const num = parseInt(am);
+      if (num > 0 && num !== expectedMemberCount && num < 50) {
+        drifts.push({ type: 'stale_agent_count', source: 'family-roles.json', target: fname, field: 'member_count', expected: String(expectedMemberCount), found: String(num) });
+      }
+    }
+
+    // Check for stale protected file count
+    const protMatches = content.match(/(\d+)\s*protected\s*files/gi) || [];
+    for (const pm of protMatches) {
+      const num = parseInt(pm);
+      if (num > 0 && num !== protectedFileCount) {
+        drifts.push({ type: 'stale_protected_count', source: 'UNTOUCHABLE_FILES.txt', target: fname, field: 'protected_files', expected: String(protectedFileCount), found: String(num) });
+      }
+    }
+
+    // Check for stale process count
+    const procMatches = content.match(/(\d+)\s*(?:live\s+)?processes/gi) || [];
+    for (const pcm of procMatches) {
+      const num = parseInt(pcm);
+      if (num > 0 && num !== expectedProcessCount && num < 100) {
+        drifts.push({ type: 'stale_process_count', source: 'family-roles.json', target: fname, field: 'process_count', expected: String(expectedProcessCount), found: String(num) });
+      }
+    }
+
+    // If no drifts found for this file, count as clean
+    if (!drifts.some(d => d.target === fname)) {
+      cleanChecks++;
+    }
+  }
+
+  // 2. Check family-guide.json
+  const guide = safeReadJSON('/root/family-data/family-guide.json');
+  if (guide) {
+    const guideStr = JSON.stringify(guide);
+    // Check version refs
+    const guideVersions = guideStr.match(/v(\d+\.\d+\.\d+)/g) || [];
+    for (const gv of guideVersions) {
+      const ver = gv.substring(1);
+      if (ver !== expectedVersion && /^1\.\d+\.\d+$/.test(ver)) {
+        drifts.push({ type: 'stale_version', source: 'package.json', target: 'family-guide.json', field: 'version', expected: expectedVersion, found: ver });
+      }
+    }
+    // Check tool count refs
+    const guideToolMatches = guideStr.match(/(\d+)\s*(?:MCP\s+)?tools/gi) || [];
+    for (const gtm of guideToolMatches) {
+      const num = parseInt(gtm);
+      if (num > 0 && num !== actualToolCount && num < 50) {
+        drifts.push({ type: 'stale_tool_count', source: 'TOOLS array', target: 'family-guide.json', field: 'tool_count', expected: String(actualToolCount), found: String(num) });
+      }
+    }
+    // Check for references to removed tools
+    if (guideStr.includes('classify_task_complexity') || guideStr.includes('parse_user_intent')) {
+      drifts.push({ type: 'stale_tool_reference', source: 'TOOLS array', target: 'family-guide.json', field: 'removed_tools', expected: 'drift_audit', found: 'classify_task_complexity/parse_user_intent' });
+    }
+  } else { cleanChecks++; }
+
+  // 3. Check mcp-stripe-checkout.js for version refs
+  const checkoutContent = safeReadFile('/root/mcp-stripe-checkout.js');
+  if (checkoutContent) {
+    const checkoutVersions = checkoutContent.match(/v(\d+\.\d+\.\d+)/g) || [];
+    for (const cv of checkoutVersions) {
+      const ver = cv.substring(1);
+      if (ver !== expectedVersion && /^1\.\d+\.\d+$/.test(ver)) {
+        drifts.push({ type: 'stale_version', source: 'package.json', target: 'mcp-stripe-checkout.js', field: 'version', expected: expectedVersion, found: ver });
+      }
+    }
+    if (!checkoutVersions.length) cleanChecks++;
+  }
+
+  // 4. Check system-config.json for version/tool counts
+  const sysConfig = safeReadJSON('/root/family-data/system-config.json');
+  if (sysConfig) {
+    const scStr = JSON.stringify(sysConfig);
+    const scVersions = scStr.match(/v(\d+\.\d+\.\d+)/g) || [];
+    for (const sv of scVersions) {
+      const ver = sv.substring(1);
+      if (ver !== expectedVersion && /^1\.\d+\.\d+$/.test(ver)) {
+        drifts.push({ type: 'stale_version', source: 'package.json', target: 'system-config.json', field: 'version', expected: expectedVersion, found: ver });
+      }
+    }
+    if (!scVersions.length) cleanChecks++;
+  }
+
+  // 5. Check FREE_TOOLS in mcp-api-middleware.js match actual tool names
+  const middlewareContent = safeReadFile('/root/mcp-api-middleware.js');
+  if (middlewareContent) {
+    const freeToolsMatch = middlewareContent.match(/'nervous-system':\s*\[([^\]]+)\]/);
+    if (freeToolsMatch) {
+      const freeToolNames = freeToolsMatch[1].match(/'([^']+)'/g);
+      if (freeToolNames) {
+        const actualToolNames = TOOLS.map(t => t.name);
+        for (const ft of freeToolNames) {
+          const toolName = ft.replace(/'/g, '');
+          if (actualToolNames.includes(toolName)) {
+            cleanChecks++;
+          } else {
+            drifts.push({ type: 'invalid_free_tool', source: 'TOOLS array', target: 'mcp-api-middleware.js', field: 'FREE_TOOLS', expected: 'valid tool name', found: toolName });
+          }
+        }
+      }
+    }
+  }
+
+  // 6. Check sitemap.xml has all public pages
+  const sitemapContent = safeReadFile('/root/family-home/sitemap.xml');
+  if (sitemapContent && htmlFiles.length > 0) {
+    const publicPages = htmlFiles.filter(f => {
+      const name = f.split('/').pop();
+      return !['404.html', 'arthur.html', 'aram-consent.html', 'explorer.html', 'checklist.html'].includes(name);
+    });
+    for (const page of publicPages) {
+      const pageName = page.split('/').pop();
+      if (pageName === 'index.html') {
+        if (sitemapContent.includes('/family/')) cleanChecks++;
+      } else {
+        if (sitemapContent.includes(pageName)) {
+          cleanChecks++;
+        } else {
+          drifts.push({ type: 'missing_from_sitemap', source: 'sitemap.xml', target: pageName, field: 'listed', expected: 'true', found: 'false' });
+        }
+      }
+    }
+  }
+
+  return { drifts, cleanChecks };
+}
+
+function runDriftAudit(scope) {
+  const timestamp = new Date().toISOString();
+  const allDrifts = [];
+  let totalClean = 0;
+  const scopes = scope === 'full' ? ['roles', 'versions', 'files', 'processes', 'website'] : [scope];
+
+  for (const s of scopes) {
+    let result;
+    switch (s) {
+      case 'roles': result = auditRoles(); break;
+      case 'versions': result = auditVersions(); break;
+      case 'files': result = auditFiles(); break;
+      case 'processes': result = auditProcesses(); break;
+      case 'website': result = auditWebsite(); break;
+      default: result = { drifts: [{ type: 'unknown_scope', source: '', target: '', field: s, expected: 'valid scope', found: 'unknown' }], cleanChecks: 0 };
+    }
+    allDrifts.push(...result.drifts);
+    totalClean += result.cleanChecks;
+  }
+
+  return {
+    scope,
+    timestamp,
+    status: allDrifts.length === 0 ? 'clean' : 'drift_detected',
+    drift_count: allDrifts.length,
+    drifts: allDrifts,
+    clean_checks: totalClean
+  };
+}
 
 // ============================================================
 // Handle tool calls
@@ -708,6 +1281,11 @@ function handleToolCall(name, args) {
       return dispatchToLLM(args.task, args.max_turns);
     }
 
+    case 'drift_audit': {
+      const scope = args.scope || 'full';
+      return runDriftAudit(scope);
+    }
+
     default:
       return { error: 'Unknown tool' };
   }
@@ -745,6 +1323,11 @@ ${FRAMEWORK.before_any_change.map(s => `- ${s}`).join('\n')}`;
 
     case 'nervous-system://templates':
       return `## SESSION HANDOFF TEMPLATE\n${SESSION_HANDOFF_TEMPLATE.template}\n\n---\n\n## WORKLOG FORMAT\n${WORKLOG_TEMPLATE.format}\n\n---\n\n## PREFLIGHT SCRIPT\n${PREFLIGHT_PATTERN.script_template}\n\n---\n\n## UNTOUCHABLE FILES TEMPLATE\n${PREFLIGHT_PATTERN.untouchable_template}`;
+
+    case 'nervous-system://drift-audit': {
+      const result = runDriftAudit('full');
+      return `## Drift Audit Report\nTimestamp: ${result.timestamp}\nStatus: ${result.status}\nDrifts found: ${result.drift_count}\nClean checks: ${result.clean_checks}\n\n${result.drifts.map(d => `- [${d.type}] ${d.source} -> ${d.target}: ${d.field} expected="${d.expected}" found="${d.found}"`).join('\n') || 'No drifts detected.'}`;
+    }
 
     default:
       return null;
@@ -824,7 +1407,7 @@ const server = http.createServer((req, res) => {
   // Health check
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.1.0', protocol: MCP_VERSION }));
+    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.4.0', protocol: MCP_VERSION }));
     return;
   }
 
@@ -941,7 +1524,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       name: 'The Nervous System MCP Server',
-      version: '1.1.0',
+      version: '1.4.0',
       protocol: MCP_VERSION,
       description: 'LLM behavioral enforcement framework. 7 core rules, preflight checks, session handoffs, worklogs, violation logging, kill switch, hash-chained audit, and forced reflection cycles. Built by Arthur Palyan.',
       endpoints: {
@@ -963,8 +1546,8 @@ const server = http.createServer((req, res) => {
 migrateExistingViolations();
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.error(`[MCP Server] Nervous System v1.1.0 running on port ${PORT}`);
+  console.error(`[MCP Server] Nervous System v1.4.0 running on port ${PORT}`);
   console.error(`[MCP Server] SSE: /sse | HTTP: /mcp | Health: /health | Kill: POST /kill | Audit: GET /audit/verify | Dispatches: GET /dispatches`);
   console.error(`[MCP Server] Protocol: ${MCP_VERSION}`);
-  console.error(`[MCP Server] Tools: ${TOOLS.length} (including kill switch, audit chain, dispatch)`);
+  console.error(`[MCP Server] Tools: ${TOOLS.length} (including kill switch, audit chain, dispatch, drift audit)`);
 });
