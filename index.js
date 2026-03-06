@@ -728,6 +728,16 @@ const TOOLS = [
         output_path: { type: 'string', description: 'Where to write CLAUDE.md. Defaults to project root.' }
       }
     }
+  },
+  // NEW: Self-Check
+  {
+    name: 'self_check',
+    annotations: { title: 'Self-Check', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Runs automated self-diagnosis on the Nervous System. Checks for: rate-limiting own operations, secrets in source code, info leakage in tool output, hardcoded paths, missing smoke tests, and version desync. Run before every publish and as part of security audits.',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
   }
 ];
 
@@ -1469,6 +1479,16 @@ function runSecurityAudit() {
     checksPassed++;
   } catch (e) {}
 
+
+  // Merge self-check findings into security audit
+  try {
+    const selfCheck = runSelfCheck();
+    if (selfCheck.findings && selfCheck.findings.length > 0) {
+      for (const f of selfCheck.findings) {
+        vulnerabilities.push({ type: "self_check_" + f.type, severity: f.severity, detail: f.message, fix: f.fix });
+      }
+    }
+  } catch (e) {}
   return {
     status: vulnerabilities.length === 0 ? 'secure' : 'vulnerabilities_found',
     vulnerability_count: vulnerabilities.length,
@@ -1904,6 +1924,10 @@ function handleToolCall(name, args) {
       return runPrePublishAudit(args.source_file);
     }
 
+
+    case 'self_check': {
+      return runSelfCheck();
+    }
     case 'mcp_analyzer': {
       return runMCPAnalyzer(args.mode, args.output_path);
     }
@@ -1914,6 +1938,146 @@ function handleToolCall(name, args) {
 }
 
 // ============================================================
+// ============================================================
+// SELF-CHECK - Catches issues before Arthur has to
+// Added because Arthur manually caught: password leaks, rate limiter
+// blocking own operations, info leakage in analyzer output,
+// false positives in audits, and untested code shipping to npm.
+// This function runs as part of security_audit and pre_publish_audit.
+// ============================================================
+
+function runSelfCheck() {
+  const findings = [];
+
+  // 1. CHECK: Are we rate-limiting ourselves?
+  // The MCP middleware should bypass rate limits for localhost
+  try {
+    const middleware = fs.readFileSync(projectPath('project_root') ? path.join(projectPath('project_root'), 'mcp-api-middleware.js') : '/root/mcp-api-middleware.js', 'utf8');
+    if (!middleware.includes('isLocal') && !middleware.includes('127.0.0.1')) {
+      findings.push({
+        type: 'self_rate_limiting',
+        severity: 'high',
+        message: 'MCP middleware has no localhost bypass. Internal operations (Tamara, smoke tests, bridge) will count against free tier quota.',
+        fix: 'Add localhost detection at start of validateRequest: if IP is 127.0.0.1 or ::1, return { allowed: true, tier: "internal" }'
+      });
+    }
+  } catch (e) {}
+
+  // 2. CHECK: Does our source code contain secrets?
+  try {
+    const sourceFile = __filename;
+    const source = fs.readFileSync(sourceFile, 'utf8');
+    const lines = source.split('\n');
+    
+    // Known password patterns (not regex definitions, actual values)
+    const dangerPatterns = [
+      // Password detection uses generic patterns only - no actual passwords in source
+      { name: 'stripe_live_key', pat: /sk_live_[a-zA-Z0-9]{20,}/ },
+      { name: 'npm_token', pat: /npm_[A-Za-z0-9]{20,}/ },
+      { name: 'bot_token_value', pat: /\d{10}:AA[A-Za-z0-9_-]{30,}/ },
+    ];
+
+    lines.forEach(function(line, idx) {
+      if (line.trim().startsWith('//')) return;
+      // Skip regex pattern definitions (lines that define detection patterns)
+      if (line.includes('pat:') || line.includes('pattern') || line.includes('Patterns')) return;
+      for (var dp of dangerPatterns) {
+        if (dp.pat.test(line)) {
+          findings.push({
+            type: 'secret_in_source',
+            severity: 'critical',
+            message: dp.name + ' found in own source code at line ' + (idx + 1),
+            fix: 'Remove the secret immediately and publish a new version'
+          });
+        }
+      }
+    });
+  } catch (e) {}
+
+  // 3. CHECK: Do our tools expose internal project details?
+  // The mcp_analyzer should not return raw file counts, paths, or structure
+  try {
+    const source = fs.readFileSync(__filename, 'utf8');
+    if (source.includes('result.project = characteristics') || 
+        source.includes('characteristics.file_count') && source.includes('reason:') && !source.includes('// internal only')) {
+      // Check if file counts leak into user-visible output
+      var analyzerSection = source.substring(source.indexOf('runMCPAnalyzer'));
+      if (analyzerSection.includes("characteristics.file_count + '")) {
+        findings.push({
+          type: 'info_leakage',
+          severity: 'medium',
+          message: 'mcp_analyzer exposes raw project scan data (file counts, paths) in its response',
+          fix: 'Return only recommendations and offer to apply them, not raw scan details'
+        });
+      }
+    }
+  } catch (e) {}
+
+  // 4. CHECK: Are there hardcoded /root/ paths in code that ships to clients?
+  try {
+    var source = fs.readFileSync(__filename, 'utf8');
+    var lines = source.split('\n');
+    var hardcodedCount = 0;
+    lines.forEach(function(line, idx) {
+      if (line.trim().startsWith('//')) return;
+      if (line.includes('description:') || line.includes('tagline:') || line.includes('context:')) return;
+      if ((line.includes("'/root/") || line.includes('"/root/')) && !line.includes('projectPath') && !line.includes('PROJECT')) {
+        hardcodedCount++;
+      }
+    });
+    if (hardcodedCount > 5) {
+      findings.push({
+        type: 'non_portable_paths',
+        severity: 'high',
+        message: hardcodedCount + ' hardcoded /root/ paths found. These break on client machines.',
+        fix: 'Replace with projectPath() lookups from nervous-system.config.json'
+      });
+    }
+  } catch (e) {}
+
+  // 5. CHECK: Does the smoke test exist and is it up to date?
+  try {
+    var smokeTestPath = path.join(path.dirname(__filename), 'smoke-test.js');
+    if (!fs.existsSync(smokeTestPath)) {
+      // Try alternate locations
+      smokeTestPath = projectPath('project_root') ? path.join(projectPath('project_root'), 'ns-smoke-test.js') : null;
+    }
+    if (!smokeTestPath || !fs.existsSync(smokeTestPath)) {
+      findings.push({
+        type: 'missing_regression_test',
+        severity: 'medium',
+        message: 'No smoke test found. Tool regressions will not be caught before they reach users.',
+        fix: 'Create ns-smoke-test.js that calls every tool and verifies responses'
+      });
+    }
+  } catch (e) {}
+
+  // 6. CHECK: Is the version in source synced with package.json?
+  try {
+    var pkgPath = projectPath('package_json') || path.join(path.dirname(__filename), 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      var pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      var source = fs.readFileSync(__filename, 'utf8');
+      var siMatch = source.match(/SERVER_INFO\s*=\s*\{[^}]*version:\s*'([^']+)'/);
+      if (siMatch && siMatch[1] !== pkg.version) {
+        findings.push({
+          type: 'version_desync',
+          severity: 'medium',
+          message: 'Source says v' + siMatch[1] + ' but package.json says v' + pkg.version,
+          fix: 'Sync version constants before publishing'
+        });
+      }
+    }
+  } catch (e) {}
+
+  return {
+    status: findings.length === 0 ? 'clean' : findings.some(function(f) { return f.severity === 'critical'; }) ? 'CRITICAL' : 'issues_found',
+    finding_count: findings.length,
+    critical: findings.filter(function(f) { return f.severity === 'critical'; }).length,
+    findings: findings
+  };
+}
+
 // MCP ANALYZER - Analyzes project and generates tailored config
 // ============================================================
 

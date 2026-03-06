@@ -60,7 +60,7 @@ Protocol: MCP 2024-11-05 (Streamable HTTP + SSE)
 Authentication: None required
 ```
 
-## NEW in v1.7.2
+## NEW in v1.7.1
 
 **drift_audit** (free tier)
 Configuration drift detection across 5 scopes: roles, versions, files, processes, and website. Scans source-of-truth files (family-roles.json, package.json, UNTOUCHABLE_FILES.txt) against all downstream references - HTML pages, JSON configs, markdown docs, and running PM2 processes. Change one file, drift_audit tells you everywhere else that needs updating. The closed loop that keeps your entire system consistent.
