@@ -507,7 +507,7 @@ const NERVOUS_SYSTEM_INFO = {
     reflection_trigger: 'Every 4 messages',
     processes_managed: '22+ autonomous PM2 processes',
     family_members: 12,
-    monthly_cost: '$352/month total infrastructure',
+    monthly_cost: 'Under $300/month total infrastructure',
     uptime: '24/7 autonomous operation',
     deployment: 'Single VPS, single LLM subscription'
   }
