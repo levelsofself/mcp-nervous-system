@@ -129,7 +129,7 @@ const MCP_VERSION = '2024-11-05';
 // Server info
 const SERVER_INFO = {
   name: 'nervous-system',
-  version: '1.5.0'
+  version: '1.5.1'
 };
 
 // ============================================================
@@ -138,7 +138,7 @@ const SERVER_INFO = {
 
 const FRAMEWORK = {
   name: 'The Nervous System',
-  version: '1.5.0',
+  version: '1.5.1',
   author: 'Arthur Palyan',
   tagline: 'Anthropic built the brain. Arthur built the nervous system that keeps it from hurting itself.',
   problem: 'LLMs lose context between sessions, loop on problems instead of dispatching, silently fail without progress notes, edit protected files, drift from the real problem, and solve instead of asking.',
@@ -637,6 +637,18 @@ const TOOLS = [
     annotations: { title: 'Session Close', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     description: 'One-call session close. Runs drift_audit scope=full, then all 3 propagators. Returns combined results. The end-of-session button.',
     inputSchema: { type: 'object', properties: {} }
+  },
+  // NEW: Page Health
+  {
+    name: 'page_health',
+    annotations: { title: 'Page Health Check', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    description: 'Checks HTML pages in /root/family-home/ for broken links, broken fetches, missing mobile nav, placeholder text, missing images, stale links, missing OG tags, missing favicon, JS syntax issues, and empty sections. Catches what drift_audit does not - actual page functionality and UX issues.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page: { type: 'string', description: "Specific page to check (e.g. 'gateway.html'), or 'all' for everything" }
+      }
+    }
   }
 ];
 
@@ -1377,6 +1389,165 @@ function runAutoPropagators() {
 }
 
 // ============================================================
+// PAGE HEALTH ENGINE
+// ============================================================
+
+function runPageHealth(page) {
+  const FAMILY_HOME = '/root/family-home';
+  const issues = [];
+
+  let htmlFiles;
+  if (page && page !== 'all') {
+    const target = page.endsWith('.html') ? page : page + '.html';
+    const fullPath = `${FAMILY_HOME}/${target}`;
+    if (!fs.existsSync(fullPath)) return { status: 'error', error: `File not found: ${target}` };
+    htmlFiles = [target];
+  } else {
+    try {
+      htmlFiles = fs.readdirSync(FAMILY_HOME).filter(f => f.endsWith('.html'));
+    } catch (e) {
+      return { status: 'error', error: `Cannot read ${FAMILY_HOME}: ${e.message}` };
+    }
+  }
+
+  for (const file of htmlFiles) {
+    const filePath = `${FAMILY_HOME}/${file}`;
+    let content;
+    try { content = fs.readFileSync(filePath, 'utf8'); } catch (e) { continue; }
+
+    // 1. BROKEN LINKS - local href/src that don't exist
+    const localRefs = [];
+    const hrefMatches = content.matchAll(/(?:href|src)=["'](?!https?:\/\/|mailto:|tel:|#|javascript:|data:)([^"'#?]+)/gi);
+    for (const m of hrefMatches) {
+      const ref = m[1].trim();
+      if (!ref || ref.startsWith('//') || ref.startsWith('{')) continue;
+      localRefs.push(ref);
+    }
+    for (const ref of localRefs) {
+      const resolved = ref.startsWith('/') ? ref : `${FAMILY_HOME}/${ref}`;
+      if (!fs.existsSync(resolved)) {
+        issues.push({ page: file, type: 'broken_link', detail: `Local reference "${ref}" - file not found` });
+      }
+    }
+
+    // 2. BROKEN FETCHES - check fetch() endpoints respond on localhost
+    const fetchMatches = content.matchAll(/fetch\s*\(\s*['"`]([^'"`]+)['"`]/g);
+    for (const m of fetchMatches) {
+      const url = m[1];
+      if (url.includes('${')) continue; // skip template literals with variables
+      if (url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1') || url.startsWith('/')) {
+        let testUrl = url;
+        if (url.startsWith('/')) {
+          // Try to figure out port from context, default to common ports
+          testUrl = `http://localhost:3000${url}`;
+        }
+        try {
+          execSync(`curl -s -o /dev/null -w "%{http_code}" --max-time 2 "${testUrl}"`, { encoding: 'utf8', timeout: 3000 });
+        } catch (e) {
+          issues.push({ page: file, type: 'broken_fetch', detail: `fetch("${url}") - endpoint not responding` });
+        }
+      }
+    }
+
+    // 3. MOBILE NAV - has nav-links but no hamburger/mobile menu
+    const hasNavLinks = /class=["'][^"']*nav-links/i.test(content) || /<nav[\s>]/i.test(content);
+    const hasHamburger = /hamburger|mobile-menu|menu-toggle|nav-toggle|burger/i.test(content) || /class=["'][^"']*toggle/i.test(content);
+    if (hasNavLinks && !hasHamburger) {
+      issues.push({ page: file, type: 'no_mobile_menu', detail: 'nav-links found but no hamburger toggle for mobile' });
+    }
+
+    // 4. PLACEHOLDER TEXT - "--" as default in stat/value elements
+    const placeholderMatches = content.matchAll(/id=["']([^"']+)["'][^>]*>\s*--\s*</g);
+    for (const m of placeholderMatches) {
+      issues.push({ page: file, type: 'placeholder_text', detail: `Element "${m[1]}" shows "--" (live data not loading)` });
+    }
+    // Also check spans/divs with class containing stat/value/count
+    const statPlaceholders = content.matchAll(/class=["'][^"']*(?:stat|value|count|metric)[^"']*["'][^>]*>\s*--\s*</gi);
+    for (const m of statPlaceholders) {
+      issues.push({ page: file, type: 'placeholder_text', detail: 'Stat/value element shows "--" (live data not loading)' });
+    }
+
+    // 5. MISSING IMAGES - img src referencing local files that don't exist
+    const imgMatches = content.matchAll(/<img[^>]+src=["'](?!https?:\/\/|data:)([^"']+)["']/gi);
+    for (const m of imgMatches) {
+      const src = m[1].trim();
+      if (!src || src.startsWith('{')) continue;
+      const resolved = src.startsWith('/') ? src : `${FAMILY_HOME}/${src}`;
+      if (!fs.existsSync(resolved)) {
+        issues.push({ page: file, type: 'missing_image', detail: `Image "${src}" not found` });
+      }
+    }
+
+    // 6. STALE LINKS - external links to app stores, npm, github format check
+    const extLinkMatches = content.matchAll(/href=["'](https?:\/\/[^"']+)["']/gi);
+    for (const m of extLinkMatches) {
+      const url = m[1];
+      if (/play\.google\.com/.test(url) && !/play\.google\.com\/store\/apps\/details\?id=/.test(url)) {
+        issues.push({ page: file, type: 'stale_link', detail: `Malformed Play Store link: ${url}` });
+      }
+      if (/apps\.apple\.com/.test(url) && !/apps\.apple\.com\/.*\/app\//.test(url)) {
+        issues.push({ page: file, type: 'stale_link', detail: `Malformed App Store link: ${url}` });
+      }
+      if (/npmjs\.com/.test(url) && !/npmjs\.com\/package\//.test(url)) {
+        issues.push({ page: file, type: 'stale_link', detail: `Malformed npm link: ${url}` });
+      }
+      if (/github\.com/.test(url) && /github\.com\/?["']/.test(url)) {
+        issues.push({ page: file, type: 'stale_link', detail: `Generic GitHub link (no repo): ${url}` });
+      }
+    }
+
+    // 7. MISSING OG TAGS
+    const ogTags = ['og:title', 'og:description', 'og:image'];
+    for (const tag of ogTags) {
+      if (!content.includes(`property="${tag}"`) && !content.includes(`property='${tag}'`)) {
+        issues.push({ page: file, type: 'missing_og_tag', detail: `Missing ${tag} meta tag` });
+      }
+    }
+
+    // 8. MISSING FAVICON
+    if (!/rel=["'](?:icon|shortcut icon)["']/i.test(content)) {
+      issues.push({ page: file, type: 'missing_favicon', detail: 'No favicon link tag found' });
+    }
+
+    // 9. CONSOLE ERRORS - JS syntax issues (unclosed tags, mismatched brackets)
+    const scriptBlocks = content.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi);
+    for (const m of scriptBlocks) {
+      const js = m[1].trim();
+      if (!js) continue;
+      // Check bracket balance
+      let parens = 0, braces = 0, brackets = 0;
+      for (const ch of js) {
+        if (ch === '(') parens++;
+        else if (ch === ')') parens--;
+        else if (ch === '{') braces++;
+        else if (ch === '}') braces--;
+        else if (ch === '[') brackets++;
+        else if (ch === ']') brackets--;
+      }
+      if (parens !== 0) issues.push({ page: file, type: 'js_syntax', detail: `Mismatched parentheses in script block (balance: ${parens})` });
+      if (braces !== 0) issues.push({ page: file, type: 'js_syntax', detail: `Mismatched braces in script block (balance: ${braces})` });
+      if (brackets !== 0) issues.push({ page: file, type: 'js_syntax', detail: `Mismatched brackets in script block (balance: ${brackets})` });
+    }
+
+    // 10. EMPTY SECTIONS
+    const sectionMatches = content.matchAll(/<section[^>]*>([\s\S]*?)<\/section>/gi);
+    for (const m of sectionMatches) {
+      const inner = m[1].replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, '').trim();
+      if (!inner) {
+        issues.push({ page: file, type: 'empty_section', detail: 'Section tag with no visible content' });
+      }
+    }
+  }
+
+  return {
+    status: issues.length === 0 ? 'healthy' : 'issues_found',
+    pages_checked: htmlFiles.length,
+    issue_count: issues.length,
+    issues
+  };
+}
+
+// ============================================================
 // Handle tool calls
 // ============================================================
 function handleToolCall(name, args) {
@@ -1495,6 +1666,10 @@ function handleToolCall(name, args) {
         propagation: propagateResult,
         summary: driftResult.drift_count === 0 ? 'Session clean - no drifts, propagators run' : `${driftResult.drift_count} drifts found - review before closing`
       };
+    }
+
+    case 'page_health': {
+      return runPageHealth(args.page || 'all');
     }
 
     default:
@@ -1735,7 +1910,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       name: 'The Nervous System MCP Server',
-      version: '1.5.0',
+      version: '1.5.1',
       protocol: MCP_VERSION,
       description: 'LLM behavioral enforcement framework. 7 core rules, preflight checks, session handoffs, worklogs, violation logging, kill switch, hash-chained audit, and forced reflection cycles. Built by Arthur Palyan.',
       endpoints: {
@@ -1757,8 +1932,8 @@ const server = http.createServer((req, res) => {
 migrateExistingViolations();
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.error(`[MCP Server] Nervous System v1.5.0 running on port ${PORT}`);
+  console.error(`[MCP Server] Nervous System v1.5.1 running on port ${PORT}`);
   console.error(`[MCP Server] SSE: /sse | HTTP: /mcp | Health: /health | Kill: POST /kill | Audit: GET /audit/verify | Dispatches: GET /dispatches`);
   console.error(`[MCP Server] Protocol: ${MCP_VERSION}`);
-  console.error(`[MCP Server] Tools: ${TOOLS.length} (including kill switch, audit chain, dispatch, drift audit)`);
+  console.error(`[MCP Server] Tools: ${TOOLS.length} (including kill switch, audit chain, dispatch, drift audit, page health)`);
 });
