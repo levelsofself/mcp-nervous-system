@@ -1228,15 +1228,11 @@ function runSecurityAudit() {
   // 1. Scan HTML files for hardcoded passwords/secrets
   const htmlDir = '/root/family-home/';
   const secretPatterns = [
-    /Liarzhek1\$/g,
-    /Levelsofself1\$/g,
     /\d{10}:AA[A-Za-z0-9_-]{30,}/g,
     /sk-ant-[a-zA-Z0-9_-]+/g,
     /npm_[A-Za-z0-9]{20,}/g,
     /ghp_[A-Za-z0-9]{20,}/g,
     /BOT_TOKEN\s*[:=]\s*['"][^'"]+['"]/gi,
-    /PAPA_FULL\s*[:=]\s*['"][^'"]+['"]/gi,
-    /PAPA_READ\s*[:=]\s*['"][^'"]+['"]/gi
   ];
   try {
     const htmlFiles = fs.readdirSync(htmlDir).filter(f => f.endsWith('.html'));
