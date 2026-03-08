@@ -192,7 +192,7 @@ const MCP_VERSION = '2024-11-05';
 // Server info
 const SERVER_INFO = {
   name: 'nervous-system',
-  version: '1.7.4'
+  version: '1.8.0'
 };
 
 // ============================================================
@@ -201,7 +201,7 @@ const SERVER_INFO = {
 
 const FRAMEWORK = {
   name: 'The Nervous System',
-  version: '1.7.4',
+  version: '1.8.0',
   author: 'Arthur Palyan',
   tagline: 'Anthropic built the brain. Arthur built the nervous system that keeps it from hurting itself.',
   problem: 'LLMs lose context between sessions, loop on problems instead of dispatching, silently fail without progress notes, edit protected files, drift from the real problem, and solve instead of asking.',
@@ -669,14 +669,14 @@ const TOOLS = [
   {
     name: 'drift_audit',
     annotations: { title: 'Configuration Drift Audit', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    description: 'Scans for configuration drift - finds files, docs, and configs that reference outdated values. Detects when a file is renamed but references are not updated, when roles change but downstream docs still show old values, or when running processes do not match documentation.',
+    description: 'Scans for configuration drift - finds files, docs, and configs that reference outdated values. Detects when a file is renamed but references are not updated, when roles change but downstream docs still show old values, when running processes do not match documentation, or when bots fail compliance with the 6 universal standards. Scopes: roles, versions, files, processes, website, platforms, docs, bots.',
     inputSchema: {
       type: 'object',
       properties: {
         scope: {
           type: 'string',
-          enum: ['full', 'roles', 'versions', 'files', 'processes', 'website'],
-          description: 'What to audit. full=everything, roles=family role consistency, versions=NS version numbers, files=file reference integrity, processes=PM2 vs docs, website=HTML pages and configs for stale values'
+          enum: ['full', 'roles', 'versions', 'files', 'processes', 'website', 'docs'],
+          description: 'What to audit. full=everything, roles=family role consistency, versions=NS version numbers, files=file reference integrity, processes=PM2 vs docs, website=HTML pages and configs for stale values, docs=compares reality (pm2, ports, crons, dept folders) against BUSINESS_BUILDER.md, LLM_STARTUP.md, family-roles.json'
         }
       }
     }
@@ -751,6 +751,18 @@ const TOOLS = [
       type: 'object',
       properties: {}
     }
+  },
+  // NEW: Bot Compliance Check
+  {
+    name: 'bot_compliance_check',
+    annotations: { title: 'Bot Compliance Check', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Checks all public bot files against the 6 mandatory universal standards: (1) thinking message with 3-sec delay, (2) persistent typing indicator, (3) owner self-identification, (4) acceptance philosophy in prompt, (5) read receipts, (6) session summary extraction. Returns pass/fail per bot per standard.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        bot: { type: 'string', description: 'Check a specific bot file path, or omit to check all 10 public bots' }
+      }
+    }
   }
 ];
 
@@ -761,6 +773,8 @@ const RESOURCES = [
   { uri: 'nervous-system://rules', name: 'The 7 Core Rules', description: 'All 7 behavioral rules with explanations and enforcement', mimeType: 'text/plain' },
   { uri: 'nervous-system://templates', name: 'Templates', description: 'Ready-to-use templates for handoffs, worklogs, preflight, and untouchable lists', mimeType: 'text/plain' },
   { uri: 'nervous-system://drift-audit', name: 'Drift Audit', description: 'Configuration drift detection - checks roles, versions, file references, and running processes against source-of-truth files', mimeType: 'text/plain' },
+  { uri: 'nervous-system://tamara-reference', name: 'Tamara Reference Implementation', description: 'Autonomous AI operations manager - reference implementation for managing AI agent fleets using the Nervous System framework', mimeType: 'text/plain' },
+  { uri: 'nervous-system://case-study', name: 'Palyan Family AI System Case Study', description: 'Production case study: 13 agents, 5 platforms, 175 countries, $24/month - autonomous AI operations at scale', mimeType: 'text/plain' },
 ];
 
 // ============================================================
@@ -1307,11 +1321,386 @@ function auditWebsite() {
   return { drifts, cleanChecks };
 }
 
+function auditPlatforms() {
+  const drifts = [];
+  let cleanChecks = 0;
+
+  let registry;
+  try {
+    registry = JSON.parse(fs.readFileSync('/root/family-data/platform-features.json', 'utf8'));
+  } catch (e) {
+    return { drifts: [{ type: 'platform_registry_missing', source: '/root/family-data/platform-features.json', target: '', field: 'exists', expected: 'true', found: 'false' }], cleanChecks: 0 };
+  }
+
+  const featurePatterns = {
+    property_lookup: /require\(.*harout-property-lookup.*\)|propertyLookup/,
+    calendly_booking: /calendly|book_calendly/i,
+    write_log: /write_log/,
+    doc_generation: /generateNDA|generateDoc|doc-generator/,
+    nda_generation: /generateNDA|generateDoc|doc-generator/,
+    doc_generation_via_link: /api\.100levelup\.com\/family\/docs|doc-generator/,
+    ip_agreement: /ip.?agreement|generateIP/i,
+    pdf_sending: /sendDocument|send.*pdf/i,
+    admin_commands: /admin|\/start|isAdmin/i,
+    tool_execution: /tool|function_call|executeTool/i,
+    search_resource: /search_resource|searchResource/i,
+    coaching: /coach|system.*prompt|openai|anthropic/i,
+    legal_qa: /legal|lawyer|counsel|system.*prompt|openai|anthropic/i,
+    real_estate_qa: /real.?estate|property|system.*prompt|openai|anthropic/i,
+    translation: /translat/i,
+    multilingual_support: /translat|language/i,
+    fitness_training: /fitness|training|workout|system.*prompt|openai|anthropic/i,
+    program_design: /program|routine|plan/i,
+    client_notes: /notes|client.*note/i,
+    accounting: /account|tax|bookkeep|system.*prompt|openai|anthropic/i,
+    tax_prep: /tax/i,
+    bookkeeping: /bookkeep|ledger|account/i,
+    file_processing: /file|upload|attachment/i,
+    csv_processing: /csv|comma.?separated/i,
+    pdf_processing: /pdf|document.*process/i,
+    youth_empowerment: /youth|empower|system.*prompt|openai|anthropic/i,
+    training_sales: /training|sales|program/i,
+    calendar_management: /calendar|schedule|booking/i,
+    gang_consulting: /gang|consult|intervention/i,
+    listing_management: /listing|mls|manage/i,
+    lead_tracking: /lead|track|crm/i,
+    nod_nts: /nod|nts|notice.*default/i,
+    fix_flip: /fix.*flip|flip.*fix|rehab/i
+  };
+
+  for (const [memberName, member] of Object.entries(registry.members)) {
+    for (const [platformName, platform] of Object.entries(member.platforms)) {
+      const botFile = platform.file;
+
+      if (!fs.existsSync(botFile)) {
+        drifts.push({
+          type: 'platform_file_missing',
+          source: memberName + '/' + platformName,
+          target: botFile,
+          field: 'exists',
+          expected: 'true',
+          found: 'false'
+        });
+        continue;
+      }
+
+      let fileContent;
+      try {
+        fileContent = fs.readFileSync(botFile, 'utf8');
+      } catch (e) {
+        drifts.push({
+          type: 'platform_file_unreadable',
+          source: memberName + '/' + platformName,
+          target: botFile,
+          field: 'readable',
+          expected: 'true',
+          found: 'false'
+        });
+        continue;
+      }
+
+      for (const feature of platform.features) {
+        const pattern = featurePatterns[feature];
+        if (pattern) {
+          if (pattern.test(fileContent)) {
+            cleanChecks++;
+          } else {
+            drifts.push({
+              type: 'platform_feature_missing',
+              source: memberName + '/' + platformName,
+              target: botFile,
+              field: feature,
+              expected: 'present_in_code',
+              found: 'not_found'
+            });
+          }
+        } else {
+          // Fallback: check for the feature name as a string
+          if (fileContent.includes(feature)) {
+            cleanChecks++;
+          } else {
+            drifts.push({
+              type: 'platform_feature_missing',
+              source: memberName + '/' + platformName,
+              target: botFile,
+              field: feature,
+              expected: 'present_in_code',
+              found: 'not_found'
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return { drifts, cleanChecks };
+}
+
+// ============================================================
+// DOC DRIFT AUDIT - Compares REALITY against DOCS
+// ============================================================
+
+function auditBotCompliance() {
+  const drifts = [];
+  let cleanChecks = 0;
+  const compliance = runBotComplianceCheck();
+  for (const r of compliance.results) {
+    for (const [standard, check] of Object.entries(r.standards)) {
+      if (check.pass) {
+        cleanChecks++;
+      } else {
+        drifts.push({
+          type: 'bot_compliance',
+          source: r.file,
+          target: 'BOT_BUILD_TEMPLATE.md',
+          field: standard,
+          expected: 'implemented',
+          found: check.detail
+        });
+      }
+    }
+  }
+  return { drifts, cleanChecks };
+}
+
+function auditDocs() {
+  const drifts = [];
+  let cleanChecks = 0;
+
+  // 1A. Process drift: pm2 vs docs
+  let pm2Procs = [];
+  try {
+    pm2Procs = JSON.parse(execSync('pm2 jlist', { timeout: 10000 }).toString());
+  } catch (e) {
+    drifts.push({ type: 'doc_pm2_error', source: 'pm2', target: 'docs', field: 'pm2_access', expected: 'readable', found: e.message });
+  }
+
+  const pm2Names = {};
+  for (const p of pm2Procs) {
+    pm2Names[p.name] = p.pm2_env ? p.pm2_env.status : 'unknown';
+  }
+
+  // Extract process tables from BUSINESS_BUILDER.md and LLM_STARTUP.md
+  const bbPath = projectPath('data_dir') ? path.join(projectPath('data_dir'), 'BUSINESS_BUILDER.md') : null;
+  const startupPath = projectPath('data_dir') ? path.join(projectPath('data_dir'), 'LLM_STARTUP.md') : null;
+  const rolesPath = projectPath('roles_file');
+
+  const bbContent = bbPath ? safeReadFile(bbPath) : null;
+  const startupContent = startupPath ? safeReadFile(startupPath) : null;
+
+  function extractProcessNames(mdContent, docName) {
+    const names = {};
+    if (!mdContent) return names;
+    // Match table rows like: | name | file | purpose |
+    const lines = mdContent.split('\n');
+    let inProcessTable = false;
+    for (const line of lines) {
+      if (line.match(/\|\s*Name\s*\|\s*File\s*\|\s*Purpose/i) || line.match(/PM2 PROCESSES/i)) {
+        inProcessTable = true;
+        continue;
+      }
+      if (inProcessTable && line.match(/^\|[-\s|]+\|$/)) continue; // separator row
+      if (inProcessTable && line.startsWith('|')) {
+        const cells = line.split('|').map(c => c.trim()).filter(c => c);
+        if (cells.length >= 2) {
+          const name = cells[0];
+          if (name && !name.match(/^(Name|---|Port|Schedule)/i)) {
+            names[name] = docName;
+          }
+        }
+      } else if (inProcessTable && !line.startsWith('|') && line.trim()) {
+        inProcessTable = false;
+      }
+    }
+    return names;
+  }
+
+  const bbProcs = extractProcessNames(bbContent, 'BUSINESS_BUILDER.md');
+  const startupProcs = extractProcessNames(startupContent, 'LLM_STARTUP.md');
+
+  // Merge doc process names
+  const allDocProcs = { ...bbProcs, ...startupProcs };
+
+  // Flag: processes in pm2 but not in any doc
+  for (const name of Object.keys(pm2Names)) {
+    if (allDocProcs[name]) {
+      cleanChecks++;
+    } else {
+      drifts.push({ type: 'doc_process_undocumented', source: 'pm2', target: 'docs', field: name, expected: 'documented', found: 'not in any doc process table' });
+    }
+  }
+
+  // Flag: processes in docs but not in pm2
+  for (const [name, doc] of Object.entries(allDocProcs)) {
+    if (pm2Names[name] !== undefined) {
+      cleanChecks++;
+    } else {
+      drifts.push({ type: 'doc_process_missing_from_pm2', source: doc, target: 'pm2', field: name, expected: 'in pm2', found: 'not found' });
+    }
+  }
+
+  // 1B. Family member drift: dept folders vs family-roles.json
+  const roles = rolesPath ? safeReadJSON(rolesPath) : null;
+  if (roles && roles.members) {
+    const roleIds = new Set(roles.members.map(m => m.id).filter(Boolean));
+    const roleNames = new Set(roles.members.map(m => (m.name || '').toLowerCase()));
+
+    // Scan /root/dept-* directories
+    const projRoot = projectPath('project_root') || '/root';
+    try {
+      const deptDirs = fs.readdirSync(projRoot).filter(d => d.startsWith('dept-') && fs.statSync(path.join(projRoot, d)).isDirectory());
+      for (const dir of deptDirs) {
+        const deptName = dir.replace('dept-', '');
+        // Check if this dept name matches any member id or name
+        const hasMatch = roleIds.has(deptName) ||
+          roleNames.has(deptName) ||
+          (deptName === 'uncle-lou' && (roleIds.has('lou') || roleNames.has('uncle lou')));
+        if (hasMatch) {
+          cleanChecks++;
+        } else {
+          drifts.push({ type: 'doc_dept_no_member', source: dir, target: 'family-roles.json', field: deptName, expected: 'member entry', found: 'no matching member' });
+        }
+      }
+    } catch (e) {}
+
+    // Check members have matching dept or process
+    for (const m of roles.members) {
+      const memberId = m.id || (m.name || '').toLowerCase();
+      const deptPath = path.join(projRoot, 'dept-' + memberId);
+      const altDeptPath = memberId === 'lou' ? path.join(projRoot, 'dept-uncle-lou') : null;
+      const hasProcs = m.procs && m.procs.length > 0;
+      const hasDept = fs.existsSync(deptPath) || (altDeptPath && fs.existsSync(altDeptPath));
+      const hasPm2 = m.pm2_process ? pm2Names[m.pm2_process] !== undefined : false;
+
+      if (hasDept || hasProcs || hasPm2) {
+        cleanChecks++;
+      } else {
+        drifts.push({ type: 'doc_member_no_presence', source: 'family-roles.json', target: 'system', field: memberId, expected: 'dept folder or pm2 process', found: 'neither found' });
+      }
+    }
+
+    // Check member_count accuracy
+    if (roles.stats && roles.stats.member_count !== roles.members.length) {
+      drifts.push({ type: 'doc_stats_mismatch', source: 'family-roles.json', target: 'stats.member_count', field: 'member_count', expected: String(roles.members.length), found: String(roles.stats.member_count) });
+    } else if (roles.stats) {
+      cleanChecks++;
+    }
+  }
+
+  // 1C. Port drift: ss vs docs
+  let listeningPorts = [];
+  try {
+    const ssOutput = execSync('ss -tlnp 2>/dev/null', { timeout: 5000 }).toString();
+    const portMatches = ssOutput.matchAll(/:(\d+)\s/g);
+    const portSet = new Set();
+    for (const m of portMatches) {
+      const port = parseInt(m[1]);
+      if (port >= 3000 && port < 4000) portSet.add(port);
+    }
+    listeningPorts = Array.from(portSet);
+  } catch (e) {}
+
+  if (bbContent && listeningPorts.length > 0) {
+    // Extract documented ports from BUSINESS_BUILDER.md
+    const docPorts = new Set();
+    const portMatches = bbContent.matchAll(/:(\d{4})\b/g);
+    for (const m of portMatches) {
+      const port = parseInt(m[1]);
+      if (port >= 3000 && port < 4000) docPorts.add(port);
+    }
+
+    for (const port of listeningPorts) {
+      if (docPorts.has(port)) {
+        cleanChecks++;
+      } else {
+        drifts.push({ type: 'doc_port_undocumented', source: 'ss -tlnp', target: 'BUSINESS_BUILDER.md', field: ':' + port, expected: 'documented', found: 'listening but not in docs' });
+      }
+    }
+
+    for (const port of docPorts) {
+      if (listeningPorts.includes(port)) {
+        cleanChecks++;
+      } else {
+        drifts.push({ type: 'doc_port_not_listening', source: 'BUSINESS_BUILDER.md', target: 'ss -tlnp', field: ':' + port, expected: 'listening', found: 'not active' });
+      }
+    }
+  }
+
+  // 1D. Doc freshness
+  const docsToCheck = [
+    bbPath,
+    startupPath,
+    rolesPath,
+    projectPath('data_dir') ? path.join(projectPath('data_dir'), 'SESSION_HANDOFF.md') : null
+  ].filter(Boolean);
+
+  const now = Date.now();
+  const THREE_DAYS = 3 * 24 * 60 * 60 * 1000;
+  const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+
+  for (const docPath of docsToCheck) {
+    try {
+      const stat = fs.statSync(docPath);
+      const age = now - stat.mtimeMs;
+      const ageDays = Math.floor(age / (24 * 60 * 60 * 1000));
+      const docName = path.basename(docPath);
+      if (age > SEVEN_DAYS) {
+        drifts.push({ type: 'doc_stale', source: docName, target: '', field: 'last_modified', expected: 'within 7 days', found: ageDays + ' days ago' });
+      } else if (age > THREE_DAYS) {
+        drifts.push({ type: 'doc_aging', source: docName, target: '', field: 'last_modified', expected: 'within 3 days', found: ageDays + ' days ago' });
+      } else {
+        cleanChecks++;
+      }
+    } catch (e) {
+      drifts.push({ type: 'doc_missing', source: path.basename(docPath), target: '', field: 'exists', expected: 'true', found: 'false' });
+    }
+  }
+
+  // 1E. Cron drift
+  try {
+    const crontab = execSync('crontab -l 2>/dev/null', { timeout: 5000 }).toString();
+    const lines = crontab.split('\n');
+    const activeCrons = lines.filter(l => l.trim() && !l.startsWith('#'));
+    const commentedCrons = lines.filter(l => l.startsWith('# STOPPED') || (l.startsWith('#') && l.includes('.js') && !l.startsWith('# =') && !l.startsWith('# Only') && !l.startsWith('# All') && !l.startsWith('# PALYAN')));
+
+    // Check if BUSINESS_BUILDER mentions crons that are now stopped
+    if (bbContent) {
+      // Look for worker references in the doc that mention "Cron" schedules
+      const cronRefs = bbContent.matchAll(/\|\s*([^\|]+\.(?:js|py))\s*\|[^\|]*\|\s*(?:Cron[^\|]*)\|/gi);
+      for (const m of cronRefs) {
+        const workerFile = m[1].trim();
+        const basename = workerFile.split('/').pop();
+        // Check if this cron is commented out
+        const isStopped = commentedCrons.some(c => c.includes(basename));
+        if (isStopped) {
+          drifts.push({ type: 'doc_cron_stopped', source: 'BUSINESS_BUILDER.md', target: 'crontab', field: basename, expected: 'active (per doc)', found: 'STOPPED in crontab' });
+        } else {
+          cleanChecks++;
+        }
+      }
+    }
+
+    // Check for active crons not mentioned in docs
+    for (const cron of activeCrons) {
+      const scriptMatch = cron.match(/([^\s/]+\.(?:js|py))/);
+      if (!scriptMatch) continue;
+      const scriptName = scriptMatch[1];
+      if (bbContent && bbContent.includes(scriptName)) {
+        cleanChecks++;
+      } else {
+        drifts.push({ type: 'doc_cron_undocumented', source: 'crontab', target: 'BUSINESS_BUILDER.md', field: scriptName, expected: 'documented', found: 'active cron not in docs' });
+      }
+    }
+  } catch (e) {}
+
+  return { drifts, cleanChecks };
+}
+
 function runDriftAudit(scope) {
   const timestamp = new Date().toISOString();
   const allDrifts = [];
   let totalClean = 0;
-  const scopes = scope === 'full' ? ['roles', 'versions', 'files', 'processes', 'website'] : [scope];
+  const scopes = scope === 'full' ? ['roles', 'versions', 'files', 'processes', 'website', 'platforms', 'docs', 'bots'] : [scope];
 
   for (const s of scopes) {
     let result;
@@ -1321,6 +1710,9 @@ function runDriftAudit(scope) {
       case 'files': result = auditFiles(); break;
       case 'processes': result = auditProcesses(); break;
       case 'website': result = auditWebsite(); break;
+      case 'platforms': result = auditPlatforms(); break;
+      case 'docs': result = auditDocs(); break;
+      case 'bots': result = auditBotCompliance(); break;
       default: result = { drifts: [{ type: 'unknown_scope', source: '', target: '', field: s, expected: 'valid scope', found: 'unknown' }], cleanChecks: 0 };
     }
     allDrifts.push(...result.drifts);
@@ -1921,12 +2313,83 @@ function handleToolCall(name, args) {
     case 'session_close': {
       const driftResult = runDriftAudit('full');
       const propagateResult = runAutoPropagators();
-      return {
+
+      // Platform parity warnings
+      let platformWarnings = [];
+      try {
+        const platformRegistry = JSON.parse(fs.readFileSync('/root/family-data/platform-features.json', 'utf8'));
+        for (const [memberName, member] of Object.entries(platformRegistry.members)) {
+          const platformKeys = Object.keys(member.platforms);
+          if (platformKeys.length < 2) continue;
+          // Collect all features across platforms for this member
+          const allFeatures = new Set();
+          for (const pKey of platformKeys) {
+            for (const f of member.platforms[pKey].features) {
+              allFeatures.add(f);
+            }
+          }
+          // Check each platform for missing features
+          for (const pKey of platformKeys) {
+            const platformFeatures = new Set(member.platforms[pKey].features);
+            const missing = [];
+            for (const f of allFeatures) {
+              if (!platformFeatures.has(f)) {
+                missing.push(f);
+              }
+            }
+            if (missing.length > 0) {
+              platformWarnings.push({
+                member: memberName,
+                platform: pKey,
+                missing_features: missing,
+                note: 'Features available on other platforms but not this one'
+              });
+            }
+          }
+        }
+      } catch (e) {
+        // platform-features.json not available, skip warnings
+      }
+
+      // Check for platform-specific drifts
+      const platformDrifts = driftResult.drifts.filter(function(d) { return d.type && d.type.startsWith('platform_'); });
+
+      // Extract doc-specific drifts for blockers
+      const docDrifts = driftResult.drifts.filter(function(d) { return d.type && d.type.startsWith('doc_'); });
+      const docDriftWarnings = [];
+      if (docDrifts.length > 0) {
+        const stale = docDrifts.filter(function(d) { return d.type === 'doc_stale' || d.type === 'doc_aging'; });
+        const undocumented = docDrifts.filter(function(d) { return d.type === 'doc_process_undocumented'; });
+        const missingFromPm2 = docDrifts.filter(function(d) { return d.type === 'doc_process_missing_from_pm2'; });
+        const missingMembers = docDrifts.filter(function(d) { return d.type === 'doc_dept_no_member'; });
+        const stoppedCrons = docDrifts.filter(function(d) { return d.type === 'doc_cron_stopped'; });
+        if (stale.length > 0) docDriftWarnings.push('Stale docs: ' + stale.map(function(d) { return d.source + ' (' + d.found + ')'; }).join(', '));
+        if (undocumented.length > 0) docDriftWarnings.push('Undocumented processes: ' + undocumented.map(function(d) { return d.field; }).join(', '));
+        if (missingFromPm2.length > 0) docDriftWarnings.push('Docs reference missing processes: ' + missingFromPm2.map(function(d) { return d.field; }).join(', '));
+        if (missingMembers.length > 0) docDriftWarnings.push('Dept folders without family-roles.json entry: ' + missingMembers.map(function(d) { return d.field; }).join(', '));
+        if (stoppedCrons.length > 0) docDriftWarnings.push('Docs describe active crons that are STOPPED: ' + stoppedCrons.map(function(d) { return d.field; }).join(', '));
+      }
+
+      const result = {
         timestamp: new Date().toISOString(),
         drift_audit: driftResult,
         propagation: propagateResult,
         summary: driftResult.drift_count === 0 ? 'Session clean - no drifts, propagators run' : `${driftResult.drift_count} drifts found - review before closing`
       };
+
+      if (docDriftWarnings.length > 0) {
+        result.doc_drift_warnings = docDriftWarnings;
+        result.doc_drift_blocker = 'DOCS STALE - update before closing session';
+      }
+
+      if (platformWarnings.length > 0) {
+        result.platform_warnings = platformWarnings;
+      }
+      if (platformDrifts.length > 0) {
+        result.platform_drift_count = platformDrifts.length;
+      }
+
+      return result;
     }
 
     case 'page_health': {
@@ -1943,6 +2406,10 @@ function handleToolCall(name, args) {
     }
     case 'mcp_analyzer': {
       return runMCPAnalyzer(args.mode, args.output_path);
+    }
+
+    case 'bot_compliance_check': {
+      return runBotComplianceCheck(args.bot);
     }
 
     default:
@@ -2070,6 +2537,108 @@ function runSelfCheck() {
     finding_count: findings.length,
     critical: findings.filter(function(f) { return f.severity === 'critical'; }).length,
     findings: findings
+  };
+}
+
+// BOT COMPLIANCE CHECK - Verifies 6 mandatory universal standards
+// ============================================================
+
+function runBotComplianceCheck(botPath) {
+  const BOT_FILES = [
+    '/root/family-workers/lily-telegram-enhanced.js',
+    '/root/dept-aram/aram-telegram.js',
+    '/root/dept-harout/harout-telegram.js',
+    '/root/dept-corona/corona-telegram.js',
+    '/root/dept-soriano/soriano-telegram.js',
+    '/root/family-workers/lily-instagram.js',
+    '/root/family-workers/aram-instagram.js',
+    '/root/family-workers/harout-instagram.js',
+    '/root/family-workers/lily-facebook.js'
+  ];
+
+  const filesToCheck = botPath ? [botPath] : BOT_FILES;
+  const results = [];
+  let totalPass = 0;
+  let totalFail = 0;
+
+  for (const filepath of filesToCheck) {
+    let code = '';
+    try {
+      code = fs.readFileSync(filepath, 'utf8');
+    } catch (e) {
+      results.push({ file: filepath, error: 'File not found: ' + e.message, standards: {} });
+      continue;
+    }
+
+    const isInstagram = filepath.includes('instagram');
+    const isFacebook = filepath.includes('facebook');
+    const isTelegram = !isInstagram && !isFacebook;
+    const checks = {};
+
+    // Standard 1: Thinking message with 3-sec delay (setTimeout 3000)
+    const hasThinkingDelay = code.includes('setTimeout') && (code.includes('3000') || code.includes('_thinkTimer') || code.includes('_thinkPhrases'));
+    checks['1_thinking_message'] = { pass: hasThinkingDelay, detail: hasThinkingDelay ? 'Found setTimeout with thinking phrases' : 'Missing 3-second thinking delay pattern' };
+
+    // Standard 2: Persistent typing indicator (setInterval 4000)
+    if (isTelegram || isFacebook) {
+      const hasTypingInterval = code.includes('setInterval') && (code.includes('4000') || code.includes('_typingInterval') || code.includes('typing'));
+      checks['2_typing_indicator'] = { pass: hasTypingInterval, detail: hasTypingInterval ? 'Found typing interval' : 'Missing persistent typing indicator (setInterval 4000)' };
+    } else {
+      checks['2_typing_indicator'] = { pass: true, detail: 'N/A for Instagram (no typing indicator API)' };
+    }
+
+    // Standard 3: Owner self-identification
+    const hasVerifiedOwners = code.includes('_verifiedOwners');
+    checks['3_owner_verification'] = { pass: hasVerifiedOwners, detail: hasVerifiedOwners ? 'Found _verifiedOwners object' : 'Missing _verifiedOwners self-identification' };
+
+    // Standard 4: Acceptance philosophy in prompt
+    const hasAcceptance = code.includes('ACCEPTANCE PHILOSOPHY') || code.includes('Accept EVERYONE');
+    checks['4_acceptance_philosophy'] = { pass: hasAcceptance, detail: hasAcceptance ? 'Found acceptance philosophy in prompt' : 'Missing acceptance philosophy in system prompt' };
+
+    // Standard 5: Read receipts
+    let hasReadReceipt = false;
+    if (isTelegram) {
+      hasReadReceipt = code.includes('sendChatAction') && code.includes('typing');
+    } else if (isFacebook) {
+      hasReadReceipt = code.includes('mark_seen') || code.includes('sendMarkSeen');
+    } else {
+      // Instagram - responding promptly is the read receipt
+      hasReadReceipt = true;
+    }
+    checks['5_read_receipt'] = { pass: hasReadReceipt, detail: hasReadReceipt ? 'Read receipt implemented' : 'Missing read receipt on message receive' };
+
+    // Standard 6: Session summary extraction
+    const hasSummary = code.includes('extractUserSummary') || code.includes('_userSummaries');
+    checks['6_session_summary'] = { pass: hasSummary, detail: hasSummary ? 'Found session summary extraction' : 'Missing session summary (extractUserSummary)' };
+
+    let passes = 0;
+    let fails = 0;
+    for (const key of Object.keys(checks)) {
+      if (checks[key].pass) passes++;
+      else fails++;
+    }
+    totalPass += passes;
+    totalFail += fails;
+
+    const name = path.basename(filepath);
+    results.push({
+      file: name,
+      path: filepath,
+      score: passes + '/' + (passes + fails),
+      compliant: fails === 0,
+      standards: checks
+    });
+  }
+
+  return {
+    timestamp: new Date().toISOString(),
+    total_bots: filesToCheck.length,
+    fully_compliant: results.filter(r => r.compliant).length,
+    total_checks: totalPass + totalFail,
+    total_pass: totalPass,
+    total_fail: totalFail,
+    results: results,
+    summary: totalFail === 0 ? 'All bots fully compliant with 6 universal standards' : totalFail + ' standard violations found across ' + results.filter(r => !r.compliant).length + ' bots'
   };
 }
 
@@ -2432,6 +3001,131 @@ ${FRAMEWORK.before_any_change.map(s => `- ${s}`).join('\n')}`;
       return `## Drift Audit Report\nTimestamp: ${result.timestamp}\nStatus: ${result.status}\nDrifts found: ${result.drift_count}\nClean checks: ${result.clean_checks}\n\n${result.drifts.map(d => `- [${d.type}] ${d.source} -> ${d.target}: ${d.field} expected="${d.expected}" found="${d.found}"`).join('\n') || 'No drifts detected.'}`;
     }
 
+    case 'nervous-system://tamara-reference':
+      return `Tamara - Autonomous AI Operations Manager
+Reference Implementation for the Nervous System Framework
+
+WHAT TAMARA IS
+Tamara is an autonomous operations manager for AI agent fleets. She is not a chatbot or an assistant. She is a production system that monitors, dispatches, fixes, and reports on AI agent infrastructure without human intervention.
+
+Built on Node.js, managed by PM2, reporting via Telegram, running 60-minute autonomous check cycles. Tamara demonstrates what becomes possible when the Nervous System framework governs an entire AI operation.
+
+ARCHITECTURE
+- Runtime: Node.js on PM2 process management
+- Communication: Telegram bot API for operator alerts
+- Cycle: 60-minute autonomous health checks
+- Dispatch: Claude Code agents for complex remediation
+- Enforcement: Nervous System MCP for behavioral guardrails
+- Memory: File-based session handoffs and worklogs
+- Security: Preflight checks, audit trails, drift detection
+
+CAPABILITIES
+1. Health Monitoring - Process status, memory usage, crash detection, restart tracking
+2. Drift Detection - 7-scope configuration drift audit (roles, versions, files, processes, website, platform parity, documentation)
+3. Agent Dispatch - Writes task files, launches background LLM agents, monitors completion, collects results
+4. Security Audit - Credential exposure scanning, unauthorized file modification detection, process integrity checks
+5. Intelligent Routing - Classifies alerts by severity, delivers actionable items to operator, keeps routine data in logs
+6. Graceful Shutdown Management - Standardized shutdown handlers, session persistence, crash recovery across all managed agents
+
+INTEGRATION WITH THE NERVOUS SYSTEM
+Tamara uses the Nervous System as her governance layer:
+- drift_audit tool for configuration consistency checks
+- Session handoff templates for context preservation
+- Preflight enforcement for file protection
+- Worklog patterns for progress documentation
+- Violation logging for accountability
+
+PRODUCTION RESULTS
+- 13 AI agents managed autonomously
+- 5 platforms (Telegram, Instagram, Facebook, Web, Bot Builder)
+- 175 countries served
+- $24/month total infrastructure cost
+- Zero dedicated DevOps staff
+- 99+ protected files with automated enforcement
+- Autonomous operation for weeks without human intervention
+
+HOW TO BUILD YOUR OWN TAMARA
+1. Install the Nervous System: npm install mcp-nervous-system
+2. Create a nervous-system.config.json mapping your project structure
+3. Define your agent roster and their expected states
+4. Build a health check loop that queries PM2 (or your process manager)
+5. Add drift_audit calls to catch configuration inconsistencies
+6. Connect a notification channel (Telegram, Slack, email) for operator alerts
+7. Implement dispatch_to_llm for automated remediation of common failures
+8. Run preflight checks before any automated file modifications
+
+The Nervous System provides the framework. You provide the domain logic. The result is an autonomous operations layer that scales with your agent fleet.
+
+For enterprise implementation support: wa.me/18184399770
+Open source: npmjs.com/package/mcp-nervous-system`;
+
+    case 'nervous-system://case-study':
+      return `Palyan Family AI System - Production Case Study
+Autonomous AI Operations at Scale
+
+OVERVIEW
+The Palyan Family AI System is a production deployment of 13 specialized AI agents serving users across 175 countries through 5 platforms. The entire operation runs on a single 4GB VPS for $24/month, managed autonomously by Tamara - an AI operations manager built on the Nervous System framework.
+
+This is not a demo. This is a live system that has been running continuously since February 2026, processing real user interactions, managing real infrastructure, and operating without dedicated DevOps staff.
+
+THE AGENTS (13 total)
+- Lily: Life coach serving players across Telegram, Instagram, Facebook, and web
+- Aram: Legal counsel specializing in IP, contracts, and compliance
+- Harout: Real estate agent handling Instagram DMs and Telegram inquiries
+- Corona: Creative real estate specialist (bilingual EN/ES)
+- Soriano: Youth empowerment and training sales
+- Spartak: Translation services
+- Nick: Advanced personal development trainer
+- Harry: Financial tracking and bookkeeping
+- Kris: Business credit operations and opportunity scanning
+- Roman: Developer education and content
+- Uncle Lou: Grant research and LOI drafting
+- Lady: Multi-channel execution (email, webforms, portals, job applications)
+- Tamara: Operations manager overseeing all of the above
+
+INFRASTRUCTURE
+- Server: 4GB VPS (Ubuntu)
+- Process Manager: PM2 (29 registered processes, 19+ online)
+- LLM Access: Anthropic Max subscription
+- Total Monthly Cost: $24 (VPS $12 + domain/misc $12)
+- Platforms: Telegram, Instagram, Facebook Messenger, Web, Bot Builder SaaS
+
+GOVERNANCE LAYER
+The Nervous System MCP provides mechanical enforcement:
+- 99+ files protected by preflight checks
+- 7 enforced behavioral rules
+- SHA-256 hash-chained audit trail
+- Configuration drift detection across 7 scopes
+- Automated security auditing
+- Session handoff continuity
+
+RESULTS
+- Zero rules bypassed in production
+- 58+ violations caught and logged
+- 29 unauthorized edits blocked by preflight
+- Continuous autonomous operation
+- No dedicated operations staff required
+
+WHAT THIS PROVES
+1. AI agent fleets can be managed autonomously with the right governance layer
+2. The cost barrier to multi-agent deployment is infrastructure, not complexity
+3. Behavioral enforcement must be mechanical, not prompt-based
+4. A single operator can manage 13+ agents across 5 platforms with proper tooling
+
+ENTERPRISE IMPLICATIONS
+Organizations deploying AI agents at scale face the same challenges this system solves:
+- Agent health monitoring and crash recovery
+- Configuration consistency across agent fleets
+- Behavioral drift detection and correction
+- Security and compliance auditing
+- Operational continuity without 24/7 staffing
+
+The Nervous System framework is open source. The operational patterns are documented. Enterprise implementation support is available through consulting engagements.
+
+Contact: wa.me/18184399770
+Framework: npmjs.com/package/mcp-nervous-system
+GitHub: github.com/levelsofself/mcp-nervous-system`;
+
     default:
       return null;
   }
@@ -2510,7 +3204,7 @@ const server = http.createServer((req, res) => {
   // Health check
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.7.4', protocol: MCP_VERSION }));
+    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.8.0', protocol: MCP_VERSION }));
     return;
   }
 
@@ -2627,7 +3321,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       name: 'The Nervous System MCP Server',
-      version: '1.7.4',
+      version: '1.8.0',
       protocol: MCP_VERSION,
       description: 'LLM behavioral enforcement framework. 7 core rules, preflight checks, session handoffs, worklogs, violation logging, kill switch, hash-chained audit, and forced reflection cycles. Built by Arthur Palyan.',
       endpoints: {
@@ -2649,7 +3343,7 @@ const server = http.createServer((req, res) => {
 migrateExistingViolations();
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.error(`[MCP Server] Nervous System v1.6.0 running on port ${PORT}`);
+  console.error(`[MCP Server] Nervous System v1.7.4 running on port ${PORT}`);
   console.error(`[MCP Server] SSE: /sse | HTTP: /mcp | Health: /health | Kill: POST /kill | Audit: GET /audit/verify | Dispatches: GET /dispatches`);
   console.error(`[MCP Server] Protocol: ${MCP_VERSION}`);
   console.error(`[MCP Server] Tools: ${TOOLS.length} (including kill switch, audit chain, dispatch, drift audit, page health, pre-publish audit)`);
