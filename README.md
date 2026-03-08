@@ -60,7 +60,16 @@ Protocol: MCP 2024-11-05 (Streamable HTTP + SSE)
 Authentication: None required
 ```
 
-## NEW in v1.8.0
+## NEW in v1.9.0
+
+**Platform Integration Guides** - Working examples for governing multi-agent systems on the 3 biggest platforms plus any MCP client. Each guide gets you to governed agents in under 10 minutes.
+
+- [Ruflo (claude-flow)](./integrations/ruflo/) - Queen-Worker hive mind governance with preflight checks, drift audits, and violation logging to swarm_state
+- [Hivemind](./integrations/hivemind/) - Team chat agent governance with tool interception, heartbeat drift audits, and session handoffs
+- [Anthropic Agent Teams](./integrations/agent-teams/) - Parallel agent governance via CLAUDE.md propagation with shared untouchable lists and unified audit trails
+- [Generic MCP](./integrations/generic-mcp/) - 5-minute setup for any MCP client (Claude Desktop, Claude Code, Cursor, Windsurf, Cline)
+
+## v1.8.0
 
 **Tamara Reference Implementation + Case Study** (2 new resources)
 Production reference implementation of an autonomous AI operations manager built on the Nervous System. Includes full architecture documentation, build-your-own guide, and case study with real metrics from managing 13 agents across 5 platforms.
@@ -176,6 +185,19 @@ Try it yourself (no login required):
 - **[Plain English Rules](https://api.100levelup.com/family/rules-plain.html)** - For non-technical stakeholders
 - **[Incident Response](https://api.100levelup.com/family/incident-response.html)** - Detection, containment, resolution
 - **[EU AI Act Compliance](https://api.100levelup.com/family/eu-ai-act.html)** - Practical EU AI Act compliance tools
+
+## Integrations
+
+Works with the major multi-agent platforms and any MCP client:
+
+| Platform | Integration | Setup Time |
+|----------|------------|------------|
+| **[Ruflo (claude-flow)](./integrations/ruflo/)** | Plugin hooks into Queen-Worker pipeline | 10 min |
+| **[Hivemind](./integrations/hivemind/)** | MCP connector with tool interception | 10 min |
+| **[Anthropic Agent Teams](./integrations/agent-teams/)** | CLAUDE.md governance propagation | 10 min |
+| **[Any MCP Client](./integrations/generic-mcp/)** | 3 lines of config | 5 min |
+
+Each integration includes working code, example configs, and a step-by-step README.
 
 ## Philosophy
 

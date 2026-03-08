@@ -1,7 +1,7 @@
 {
   "name": "mcp-nervous-system",
-  "version": "1.8.1",
-  "description": "The Nervous System - LLM Behavioral Enforcement Framework. 7 mechanically enforced rules, 17 tools including kill switch, audit chain, dispatch, drift audit, security audit, page health, pre-publish audit, and session close. MCP server for Claude Desktop, Claude Code, and any MCP-compatible client.",
+  "version": "1.9.0",
+  "description": "Governance layer for multi-agent AI systems. 7 mechanically enforced rules, 19 tools including kill switch, audit chain, dispatch, drift audit, security audit, page health, pre-publish audit, and session close. Works with Ruflo, Hivemind, Agent Teams, and any MCP client.",
   "main": "server.js",
   "bin": {
     "mcp-nervous-system": "./stdio.js"
@@ -21,7 +21,12 @@
     "anthropic",
     "nervous-system",
     "kill-switch",
-    "audit-trail"
+    "audit-trail",
+    "multi-agent",
+    "agent-governance",
+    "ruflo",
+    "hivemind",
+    "agent-teams"
   ],
   "author": "Arthur Palyan <palyanai@gmail.com>",
   "license": "MIT",

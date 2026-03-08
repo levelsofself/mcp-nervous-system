@@ -1,0 +1,45 @@
+# Hivemind Team Configuration with Nervous System Governance
+# Copy this to your project root and adjust.
+
+team:
+  name: my-governed-team
+  model: claude-sonnet-4-6-20250217
+
+agents:
+  - name: developer
+    role: "Full-stack developer"
+    tools: [shell, file_edit, file_create, web_search]
+
+  - name: reviewer
+    role: "Code reviewer and QA"
+    tools: [shell, file_edit, web_search]
+
+  - name: researcher
+    role: "Research and documentation"
+    tools: [web_search, file_create]
+
+connectors:
+  # Option A: Local NS server (npm install mcp-nervous-system)
+  - name: nervous-system
+    type: mcp
+    command: npx
+    args: ["-y", "mcp-nervous-system"]
+
+  # Option B: Hosted NS server (no install needed)
+  # - name: nervous-system
+  #   type: mcp-sse
+  #   url: https://api.100levelup.com/mcp-ns/
+
+heartbeat:
+  interval: 300  # seconds - triggers NS drift_audit
+  checks:
+    - nervous-system:drift_audit
+    - nervous-system:page_health
+
+governance:
+  # NS connector intercepts these tools for preflight checks
+  intercept_tools: [shell, file_edit, file_create]
+  # Step back reflection every N agent turns
+  step_back_interval: 4
+  # Write session handoff on team session end
+  session_handoff: true

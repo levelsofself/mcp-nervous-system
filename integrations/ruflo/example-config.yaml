@@ -1,0 +1,35 @@
+# Ruflo (claude-flow) Configuration with Nervous System Governance
+# Copy this to your project root and adjust paths.
+
+queen:
+  model: claude-sonnet-4-6-20250217
+  max_workers: 4
+  health_check_interval: 300  # seconds - triggers NS drift_audit
+
+workers:
+  model: claude-haiku-4-5-20251001
+  max_turns: 30
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Bash
+    - Glob
+    - Grep
+
+shared_memory:
+  backend: sqlite
+  path: ./swarm_state.db
+
+plugins:
+  - name: nervous-system
+    module: ./ruflo-ns-plugin.js
+    config:
+      config_path: ./nervous-system.config.json
+
+# NS governance means:
+# - Every worker file edit goes through preflight_check
+# - Every 4 worker turns triggers step_back reflection
+# - Queen health check runs drift_audit
+# - Session end writes handoff document
+# - Violations log to both NS audit chain and swarm_state table

@@ -669,14 +669,14 @@ const TOOLS = [
   {
     name: 'drift_audit',
     annotations: { title: 'Configuration Drift Audit', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    description: 'Scans for configuration drift - finds files, docs, and configs that reference outdated values. Detects when a file is renamed but references are not updated, when roles change but downstream docs still show old values, when running processes do not match documentation, or when bots fail compliance with the 6 universal standards. Scopes: roles, versions, files, processes, website, platforms, docs, bots.',
+    description: 'Scans for configuration drift - finds files, docs, and configs that reference outdated values. Detects when a file is renamed but references are not updated, when roles change but downstream docs still show old values, when running processes do not match documentation, when bots fail compliance with the 6 universal standards, or when family members in family-roles.json are missing from downstream locations. Scopes: roles, versions, files, processes, website, platforms, docs, bots, members.',
     inputSchema: {
       type: 'object',
       properties: {
         scope: {
           type: 'string',
-          enum: ['full', 'roles', 'versions', 'files', 'processes', 'website', 'docs'],
-          description: 'What to audit. full=everything, roles=family role consistency, versions=NS version numbers, files=file reference integrity, processes=PM2 vs docs, website=HTML pages and configs for stale values, docs=compares reality (pm2, ports, crons, dept folders) against BUSINESS_BUILDER.md, LLM_STARTUP.md, family-roles.json'
+          enum: ['full', 'roles', 'versions', 'files', 'processes', 'website', 'docs', 'members'],
+          description: 'What to audit. full=everything, roles=family role consistency, versions=NS version numbers, files=file reference integrity, processes=PM2 vs docs, website=HTML pages and configs for stale values, docs=compares reality (pm2, ports, crons, dept folders) against BUSINESS_BUILDER.md, LLM_STARTUP.md, family-roles.json, members=checks every downstream location for missing family members from family-roles.json'
         }
       }
     }
@@ -694,6 +694,18 @@ const TOOLS = [
     annotations: { title: 'Auto Propagate', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description: 'Runs all 3 propagators (role, version, content) and reports what changed vs what was already current. Ensures all downstream files match source-of-truth values.',
     inputSchema: { type: 'object', properties: {} }
+  },
+  // NEW: Propagate Family Member
+  {
+    name: 'propagate_family_member',
+    annotations: { title: 'Propagate Family Member', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Checks family-roles.json as source of truth, detects missing members in all downstream locations, and auto-fixes what it can (family-status.json, system-config.json, HTML counts). Flags UNTOUCHABLE files for manual fix. Run after adding/removing a family member.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dry_run: { type: 'boolean', description: 'If true, only report what would change without making changes. Default: false' }
+      }
+    }
   },
   // NEW: Session Close
   {
@@ -1696,11 +1708,419 @@ function auditDocs() {
   return { drifts, cleanChecks };
 }
 
+// ============================================================
+// MEMBER PROPAGATION AUDIT
+// Checks that every member in family-roles.json exists in all
+// downstream locations. Catches the Corona/Soriano problem.
+// ============================================================
+
+function auditMembers() {
+  const drifts = [];
+  let cleanChecks = 0;
+  const rolesFile = projectPath('roles_file');
+  if (!rolesFile) return { drifts: [], cleanChecks: 0, skipped: 'roles_file not configured' };
+  const roles = safeReadJSON(rolesFile);
+  if (!roles || !roles.members) {
+    drifts.push({ type: 'members_missing_source', source: rolesFile, target: '', field: '', expected: 'valid JSON with members array', found: 'missing or invalid' });
+    return { drifts, cleanChecks };
+  }
+
+  const sourceIds = roles.members.map(function(m) { return m.id; });
+  const sourceCount = roles.members.length;
+
+  // Helper: check a downstream location for missing member IDs
+  function checkDownstream(name, ids, filePath) {
+    if (ids.length !== sourceCount) {
+      drifts.push({ type: 'member_count_mismatch', source: 'family-roles.json', target: name, field: 'count', expected: String(sourceCount), found: String(ids.length) });
+    }
+    for (var i = 0; i < sourceIds.length; i++) {
+      var sid = sourceIds[i];
+      if (ids.indexOf(sid) === -1) {
+        drifts.push({ type: 'member_missing', source: 'family-roles.json', target: name, field: sid, expected: 'present', found: 'missing' });
+      }
+    }
+    // Check for extra IDs not in source
+    for (var j = 0; j < ids.length; j++) {
+      if (sourceIds.indexOf(ids[j]) === -1) {
+        drifts.push({ type: 'member_extra', source: 'family-roles.json', target: name, field: ids[j], expected: 'not present', found: 'extra member in downstream' });
+      }
+    }
+    if (!drifts.some(function(d) { return d.target === name; })) cleanChecks++;
+  }
+
+  // 1. family-status.json (cache)
+  var statusFile = projectPath('data_dir') ? path.join(projectPath('data_dir'), 'family-status.json') : null;
+  if (statusFile) {
+    var status = safeReadJSON(statusFile);
+    if (status && Array.isArray(status)) {
+      var statusIds = status.filter(function(m) { return m.id !== 'papa'; }).map(function(m) { return m.id; });
+      checkDownstream('family-status.json', statusIds, statusFile);
+    } else if (status && status.members) {
+      var statusIds2 = status.members.map(function(m) { return m.id; });
+      checkDownstream('family-status.json', statusIds2, statusFile);
+    }
+  }
+
+  // 2. system-config.json family array
+  var configFile = projectPath('config_file');
+  if (configFile) {
+    var config = safeReadJSON(configFile);
+    if (config && config.family) {
+      // system-config includes Arthur/papa as first entry
+      var configNames = config.family.filter(function(m) { return m.name !== 'Arthur'; }).map(function(m) { return m.name; });
+      var sourceNames = roles.members.map(function(m) { return m.name; });
+      for (var k = 0; k < sourceNames.length; k++) {
+        if (configNames.indexOf(sourceNames[k]) === -1) {
+          drifts.push({ type: 'member_missing', source: 'family-roles.json', target: 'system-config.json', field: sourceNames[k], expected: 'present', found: 'missing' });
+        }
+      }
+      if (!drifts.some(function(d) { return d.target === 'system-config.json' && d.type === 'member_missing'; })) cleanChecks++;
+    }
+  }
+
+  // 3. family-home/index.html PROFILES and MS objects
+  var htmlDir = projectPath('html_dir');
+  if (htmlDir) {
+    var indexContent = safeReadFile(path.join(htmlDir, 'index.html'));
+    if (indexContent) {
+      // Check PROFILES object - extract top-level keys (lines like "  name:  {")
+      var profileIds = [];
+      var profileStart = indexContent.indexOf('PROFILES = {');
+      if (profileStart === -1) profileStart = indexContent.indexOf('PROFILES={');
+      if (profileStart !== -1) {
+        var profileBlock = indexContent.substring(profileStart, indexContent.indexOf('};', profileStart) + 2);
+        var profileLines = profileBlock.split('\n');
+        for (var pl = 0; pl < profileLines.length; pl++) {
+          var pmatch = profileLines[pl].match(/^\s+(\w+)\s*:/);
+          if (pmatch && pmatch[1] !== 'papa') profileIds.push(pmatch[1]);
+        }
+      }
+      checkDownstream('index.html PROFILES', profileIds, path.join(htmlDir, 'index.html'));
+
+      // Check MS colors object - same line-based approach
+      var msIds = [];
+      var msStart = indexContent.indexOf('const MS = {');
+      if (msStart === -1) msStart = indexContent.indexOf('const MS={');
+      if (msStart !== -1) {
+        var msBlock = indexContent.substring(msStart, indexContent.indexOf('};', msStart) + 2);
+        var msLines = msBlock.split('\n');
+        for (var ml = 0; ml < msLines.length; ml++) {
+          var mmatch = msLines[ml].match(/^\s+(\w+)\s*:/);
+          if (mmatch && mmatch[1] !== 'papa') msIds.push(mmatch[1]);
+        }
+      }
+      checkDownstream('index.html MS colors', msIds, path.join(htmlDir, 'index.html'));
+    }
+
+    // 4. meet.html - check member count in text
+    var meetContent = safeReadFile(path.join(htmlDir, 'meet.html'));
+    if (meetContent) {
+      var meetCountMatches = meetContent.match(/(\d+)\s*AI\s*family\s*members/gi) || [];
+      for (var mc = 0; mc < meetCountMatches.length; mc++) {
+        var num = parseInt(meetCountMatches[mc]);
+        // Total includes papa (+1)
+        if (num > 0 && num !== sourceCount + 1 && num !== sourceCount) {
+          drifts.push({ type: 'member_count_mismatch', source: 'family-roles.json', target: 'meet.html', field: 'member_count_text', expected: String(sourceCount + 1), found: String(num) });
+        }
+      }
+      if (!drifts.some(function(d) { return d.target === 'meet.html'; })) cleanChecks++;
+    }
+  }
+
+  // 5. family-home/server.js COLORS map, soulPaths, publicPersonas
+  var serverFile = htmlDir ? path.join(htmlDir, 'server.js') : null;
+  if (serverFile) {
+    var serverContent = safeReadFile(serverFile);
+    if (serverContent) {
+      // COLORS map
+      var colorsMatch = serverContent.match(/COLORS\s*=\s*\{([^}]+)\}/);
+      if (colorsMatch) {
+        var colorKeys = colorsMatch[1].match(/(\w+)\s*:/g) || [];
+        var colorIds = colorKeys.map(function(k) { return k.replace(/\s*:/, '').trim(); }).filter(function(k) { return k !== 'papa'; });
+        checkDownstream('server.js COLORS', colorIds, serverFile);
+      }
+
+      // soulPaths map
+      var soulMatch = serverContent.match(/soulPaths\s*=\s*\{([^}]+)\}/);
+      if (soulMatch) {
+        var soulKeys = soulMatch[1].match(/(\w+)\s*:/g) || [];
+        var soulIds = soulKeys.map(function(k) { return k.replace(/\s*:/, '').trim(); });
+        checkDownstream('server.js soulPaths', soulIds, serverFile);
+      }
+
+      // publicPersonas object - multi-line, find keys
+      var personaIds = [];
+      var personaMatches = serverContent.match(/publicPersonas\s*=\s*\{/);
+      if (personaMatches) {
+        // Extract from publicPersonas to its closing - look for member keys
+        var personaStart = serverContent.indexOf('publicPersonas = {');
+        if (personaStart !== -1) {
+          var personaBlock = serverContent.substring(personaStart, personaStart + 5000);
+          var pKeyMatches = personaBlock.match(/^\s+(\w+)\s*:\s*`/gm) || [];
+          personaIds = pKeyMatches.map(function(k) { return k.trim().replace(/\s*:\s*`$/, ''); });
+        }
+      }
+      if (personaIds.length > 0) {
+        checkDownstream('server.js publicPersonas', personaIds, serverFile);
+      }
+    }
+  }
+
+  // 6. tamara-v6.js writeFamilyStatus array (UNTOUCHABLE - flag only)
+  var tamaraFile = projectPath('project_root') ? path.join(projectPath('project_root') || process.cwd(), 'tamara-v6.js') : null;
+  if (tamaraFile) {
+    var tamaraContent = safeReadFile(tamaraFile);
+    if (tamaraContent) {
+      var wfsMatch = tamaraContent.match(/writeFamilyStatus/);
+      if (wfsMatch) {
+        // Check if each member ID appears in the file
+        for (var ti = 0; ti < sourceIds.length; ti++) {
+          if (tamaraContent.indexOf("'" + sourceIds[ti] + "'") === -1 && tamaraContent.indexOf('"' + sourceIds[ti] + '"') === -1) {
+            drifts.push({ type: 'member_missing_untouchable', source: 'family-roles.json', target: 'tamara-v6.js (UNTOUCHABLE)', field: sourceIds[ti], expected: 'present in writeFamilyStatus', found: 'missing - FLAG ONLY, do not edit' });
+          }
+        }
+        if (!drifts.some(function(d) { return d.target === 'tamara-v6.js (UNTOUCHABLE)'; })) cleanChecks++;
+      }
+    }
+  }
+
+  // 7. bots-app/public/index.html - agent count in footer/text
+  var botsAppIndex = projectPath('project_root') ? path.join(projectPath('project_root') || process.cwd(), 'bots-app', 'public', 'index.html') : null;
+  if (botsAppIndex) {
+    var botsContent = safeReadFile(botsAppIndex);
+    if (botsContent) {
+      var botsCountMatches = botsContent.match(/(\d+)\s*agents/gi) || [];
+      for (var bc = 0; bc < botsCountMatches.length; bc++) {
+        var bNum = parseInt(botsCountMatches[bc]);
+        if (bNum > 0 && bNum !== sourceCount + 1 && bNum !== sourceCount) {
+          drifts.push({ type: 'member_count_mismatch', source: 'family-roles.json', target: 'bots-app/index.html', field: 'agent_count', expected: String(sourceCount + 1), found: String(bNum) });
+        }
+      }
+      if (!drifts.some(function(d) { return d.target === 'bots-app/index.html'; })) cleanChecks++;
+    }
+  }
+
+  return { drifts, cleanChecks };
+}
+
+// ============================================================
+// MEMBER PROPAGATION ENGINE
+// Auto-fixes downstream files when family-roles.json changes.
+// ============================================================
+
+function runMemberPropagation(dryRun) {
+  var timestamp = new Date().toISOString();
+  var actions = [];
+  var flags = [];
+
+  var rolesFile = projectPath('roles_file');
+  if (!rolesFile) return { timestamp: timestamp, status: 'skipped', reason: 'roles_file not configured' };
+  var roles = safeReadJSON(rolesFile);
+  if (!roles || !roles.members) return { timestamp: timestamp, status: 'error', reason: 'family-roles.json missing or invalid' };
+
+  var sourceIds = roles.members.map(function(m) { return m.id; });
+  var sourceCount = roles.members.length;
+
+  // 1. family-status.json - just delete it, Tamara regenerates
+  var statusFile = projectPath('data_dir') ? path.join(projectPath('data_dir'), 'family-status.json') : null;
+  if (statusFile && fs.existsSync(statusFile)) {
+    var status = safeReadJSON(statusFile);
+    if (status) {
+      var statusArr = Array.isArray(status) ? status : (status.members || []);
+      var statusIds = statusArr.filter(function(m) { return m.id !== 'papa'; }).map(function(m) { return m.id; });
+      var missing = sourceIds.filter(function(id) { return statusIds.indexOf(id) === -1; });
+      if (missing.length > 0) {
+        if (!dryRun) {
+          try { fs.unlinkSync(statusFile); } catch (e) {}
+        }
+        actions.push({ file: 'family-status.json', action: dryRun ? 'would_delete' : 'deleted', reason: 'Missing members: ' + missing.join(', ') + '. Tamara will regenerate.' });
+      }
+    }
+  }
+
+  // 2. system-config.json - add missing members
+  var configFile = projectPath('config_file');
+  if (configFile) {
+    var config = safeReadJSON(configFile);
+    if (config && config.family) {
+      var configNames = config.family.map(function(m) { return m.name; });
+      var missingMembers = roles.members.filter(function(m) { return configNames.indexOf(m.name) === -1; });
+      if (missingMembers.length > 0) {
+        if (!dryRun) {
+          for (var i = 0; i < missingMembers.length; i++) {
+            var mm = missingMembers[i];
+            config.family.push({
+              name: mm.name,
+              role: mm.role,
+              procs: mm.procs || [],
+              desc: mm.desc || ''
+            });
+          }
+          try { fs.writeFileSync(configFile, JSON.stringify(config, null, 2)); } catch (e) {}
+        }
+        actions.push({ file: 'system-config.json', action: dryRun ? 'would_add' : 'added', members: missingMembers.map(function(m) { return m.name; }) });
+      }
+    }
+  }
+
+  // 3. HTML page counts - update agent/member count text
+  var htmlDir = projectPath('html_dir');
+  if (htmlDir) {
+    var htmlFiles = [];
+    try { htmlFiles = fs.readdirSync(htmlDir).filter(function(f) { return f.endsWith('.html'); }); } catch (e) {}
+    var totalWithPapa = sourceCount + 1; // family-roles + papa
+    for (var hi = 0; hi < htmlFiles.length; hi++) {
+      var htmlPath = path.join(htmlDir, htmlFiles[hi]);
+      var content = safeReadFile(htmlPath);
+      if (!content) continue;
+      var changed = false;
+      // Replace stale agent/member counts
+      var updated = content.replace(/(\d+)\s*(AI\s+)?(?:family\s+)?(?:members|agents)/gi, function(match, num) {
+        var n = parseInt(num);
+        if (n > 0 && n !== totalWithPapa && n !== sourceCount && n < 50) {
+          changed = true;
+          return match.replace(num, String(totalWithPapa));
+        }
+        return match;
+      });
+      if (changed) {
+        if (!dryRun) {
+          try { fs.writeFileSync(htmlPath, updated); } catch (e) {}
+        }
+        actions.push({ file: htmlFiles[hi], action: dryRun ? 'would_update_count' : 'updated_count', new_count: totalWithPapa });
+      }
+    }
+
+    // Also check bots-app
+    var botsIndex = projectPath('project_root') ? path.join(projectPath('project_root') || process.cwd(), 'bots-app', 'public', 'index.html') : null;
+    if (botsIndex && fs.existsSync(botsIndex)) {
+      var botsContent = safeReadFile(botsIndex);
+      if (botsContent) {
+        var botsChanged = false;
+        var botsUpdated = botsContent.replace(/(\d+)\s*agents/gi, function(match, num) {
+          var n = parseInt(num);
+          if (n > 0 && n !== totalWithPapa && n !== sourceCount && n < 50) {
+            botsChanged = true;
+            return match.replace(num, String(totalWithPapa));
+          }
+          return match;
+        });
+        if (botsChanged) {
+          if (!dryRun) {
+            try { fs.writeFileSync(botsIndex, botsUpdated); } catch (e) {}
+          }
+          actions.push({ file: 'bots-app/index.html', action: dryRun ? 'would_update_count' : 'updated_count', new_count: totalWithPapa });
+        }
+      }
+    }
+  }
+
+  // 4. Flag UNTOUCHABLE files that need manual updates
+  // tamara-v6.js
+  var tamaraFile = projectPath('project_root') ? path.join(projectPath('project_root') || process.cwd(), 'tamara-v6.js') : null;
+  if (tamaraFile) {
+    var tamaraContent = safeReadFile(tamaraFile);
+    if (tamaraContent) {
+      var tamaraMissing = sourceIds.filter(function(id) {
+        return tamaraContent.indexOf("'" + id + "'") === -1 && tamaraContent.indexOf('"' + id + '"') === -1;
+      });
+      if (tamaraMissing.length > 0) {
+        flags.push({ file: 'tamara-v6.js', status: 'UNTOUCHABLE', missing_members: tamaraMissing, action_needed: 'Add member IDs to writeFamilyStatus array' });
+      }
+    }
+  }
+
+  // family-home/index.html PROFILES and MS (UNTOUCHABLE for auto-edit per task)
+  if (htmlDir) {
+    var indexContent = safeReadFile(path.join(htmlDir, 'index.html'));
+    if (indexContent) {
+      var profileIds2 = [];
+      var pStart = indexContent.indexOf('PROFILES = {');
+      if (pStart === -1) pStart = indexContent.indexOf('PROFILES={');
+      if (pStart !== -1) {
+        var pBlock = indexContent.substring(pStart, indexContent.indexOf('};', pStart) + 2);
+        var pLines = pBlock.split('\n');
+        for (var pli = 0; pli < pLines.length; pli++) {
+          var pm = pLines[pli].match(/^\s+(\w+)\s*:/);
+          if (pm && pm[1] !== 'papa') profileIds2.push(pm[1]);
+        }
+      }
+      var profileMissing = sourceIds.filter(function(id) { return profileIds2.indexOf(id) === -1; });
+      if (profileMissing.length > 0) {
+        flags.push({ file: 'index.html PROFILES', status: 'NEEDS_UPDATE', missing_members: profileMissing, action_needed: 'Add PROFILES entries with avatar, role, desc, relation' });
+      }
+
+      var msIds2 = [];
+      var mStart = indexContent.indexOf('const MS = {');
+      if (mStart === -1) mStart = indexContent.indexOf('const MS={');
+      if (mStart !== -1) {
+        var mBlock = indexContent.substring(mStart, indexContent.indexOf('};', mStart) + 2);
+        var mLines = mBlock.split('\n');
+        for (var mli = 0; mli < mLines.length; mli++) {
+          var mm2 = mLines[mli].match(/^\s+(\w+)\s*:/);
+          if (mm2 && mm2[1] !== 'papa') msIds2.push(mm2[1]);
+        }
+      }
+      var msMissing = sourceIds.filter(function(id) { return msIds2.indexOf(id) === -1; });
+      if (msMissing.length > 0) {
+        flags.push({ file: 'index.html MS colors', status: 'NEEDS_UPDATE', missing_members: msMissing, action_needed: 'Add color scheme entries' });
+      }
+    }
+  }
+
+  // server.js soulPaths, publicPersonas, COLORS
+  var serverFile = htmlDir ? path.join(htmlDir, 'server.js') : null;
+  if (serverFile) {
+    var serverContent = safeReadFile(serverFile);
+    if (serverContent) {
+      var colorsMatch = serverContent.match(/COLORS\s*=\s*\{([^}]+)\}/);
+      if (colorsMatch) {
+        var colorKeys = colorsMatch[1].match(/(\w+)\s*:/g) || [];
+        var colorIds = colorKeys.map(function(k) { return k.replace(/\s*:/, '').trim(); }).filter(function(k) { return k !== 'papa'; });
+        var colorMissing = sourceIds.filter(function(id) { return colorIds.indexOf(id) === -1; });
+        if (colorMissing.length > 0) {
+          flags.push({ file: 'server.js COLORS', status: 'UNTOUCHABLE', missing_members: colorMissing, action_needed: 'Add color entries for missing members' });
+        }
+      }
+      var soulMatch = serverContent.match(/soulPaths\s*=\s*\{([^}]+)\}/);
+      if (soulMatch) {
+        var soulKeys = soulMatch[1].match(/(\w+)\s*:/g) || [];
+        var soulIds = soulKeys.map(function(k) { return k.replace(/\s*:/, '').trim(); });
+        var soulMissing = sourceIds.filter(function(id) { return soulIds.indexOf(id) === -1; });
+        if (soulMissing.length > 0) {
+          flags.push({ file: 'server.js soulPaths', status: 'UNTOUCHABLE', missing_members: soulMissing, action_needed: 'Add SOUL.md path entries' });
+        }
+      }
+      // publicPersonas
+      var personaStart = serverContent.indexOf('publicPersonas = {');
+      if (personaStart !== -1) {
+        var personaBlock = serverContent.substring(personaStart, personaStart + 5000);
+        var pKeyMatches = personaBlock.match(/^\s+(\w+)\s*:\s*`/gm) || [];
+        var personaIds = pKeyMatches.map(function(k) { return k.trim().replace(/\s*:\s*`$/, ''); });
+        var personaMissing = sourceIds.filter(function(id) { return personaIds.indexOf(id) === -1; });
+        if (personaMissing.length > 0) {
+          flags.push({ file: 'server.js publicPersonas', status: 'UNTOUCHABLE', missing_members: personaMissing, action_needed: 'Add public persona templates' });
+        }
+      }
+    }
+  }
+
+  return {
+    timestamp: timestamp,
+    dry_run: dryRun,
+    status: (actions.length === 0 && flags.length === 0) ? 'all_current' : 'propagation_needed',
+    auto_fixed: actions,
+    manual_flags: flags,
+    source_member_count: sourceCount,
+    source_ids: sourceIds
+  };
+}
+
 function runDriftAudit(scope) {
   const timestamp = new Date().toISOString();
   const allDrifts = [];
   let totalClean = 0;
-  const scopes = scope === 'full' ? ['roles', 'versions', 'files', 'processes', 'website', 'platforms', 'docs', 'bots'] : [scope];
+  const scopes = scope === 'full' ? ['roles', 'versions', 'files', 'processes', 'website', 'platforms', 'docs', 'bots', 'members'] : [scope];
 
   for (const s of scopes) {
     let result;
@@ -1713,6 +2133,7 @@ function runDriftAudit(scope) {
       case 'platforms': result = auditPlatforms(); break;
       case 'docs': result = auditDocs(); break;
       case 'bots': result = auditBotCompliance(); break;
+      case 'members': result = auditMembers(); break;
       default: result = { drifts: [{ type: 'unknown_scope', source: '', target: '', field: s, expected: 'valid scope', found: 'unknown' }], cleanChecks: 0 };
     }
     allDrifts.push(...result.drifts);
@@ -2310,9 +2731,14 @@ function handleToolCall(name, args) {
       return runAutoPropagators();
     }
 
+    case 'propagate_family_member': {
+      return runMemberPropagation(args.dry_run || false);
+    }
+
     case 'session_close': {
       const driftResult = runDriftAudit('full');
       const propagateResult = runAutoPropagators();
+      const memberPropResult = runMemberPropagation(false);
 
       // Platform parity warnings
       let platformWarnings = [];
@@ -2374,8 +2800,14 @@ function handleToolCall(name, args) {
         timestamp: new Date().toISOString(),
         drift_audit: driftResult,
         propagation: propagateResult,
+        member_propagation: memberPropResult,
         summary: driftResult.drift_count === 0 ? 'Session clean - no drifts, propagators run' : `${driftResult.drift_count} drifts found - review before closing`
       };
+
+      // Member propagation blocker
+      if (memberPropResult.manual_flags && memberPropResult.manual_flags.length > 0) {
+        result.member_propagation_blocker = 'MEMBER DRIFT - ' + memberPropResult.manual_flags.length + ' files need manual member updates';
+      }
 
       if (docDriftWarnings.length > 0) {
         result.doc_drift_warnings = docDriftWarnings;

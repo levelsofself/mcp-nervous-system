@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "nervous-system": {
+      "command": "npx",
+      "args": ["-y", "mcp-nervous-system"],
+      "env": {
+        "NS_CONFIG_PATH": "./nervous-system.config.json"
+      }
+    }
+  }
+}
