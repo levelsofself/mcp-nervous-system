@@ -4,7 +4,7 @@
 
 7 mechanically enforced rules that prevent the most common failure modes when LLMs have access to real infrastructure: context loss, silent failures, file damage, goal drift, and overreach.
 
-Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan Family AI System. 19 tools including configuration drift detection and emergency kill switch. Battle-tested on a 13-agent AI family running 29 processes 24/7 on a single VPS. 58+ violations logged, 0 bypassed.
+Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan Family AI System. 21 tools including configuration drift detection and emergency kill switch. Battle-tested on a 13-agent AI family running 27 processes 24/7 on a single VPS. 58+ violations logged, 0 bypassed.
 
 ## The Problem
 
@@ -93,7 +93,7 @@ Configuration drift detection across 5 scopes: roles, versions, files, processes
 | 6 | **Ask Before Touching** | Unauthorized changes. Logic changes need human approval. |
 | 7 | **Hand Off** | Context loss. Written handoffs every 3-4 exchanges. |
 
-## MCP Tools (12)
+## MCP Tools (21)
 
 | Tool | Description |
 |------|------------|
@@ -143,7 +143,7 @@ https://api.100levelup.com/family/eu-ai-act.html
 
 ## Production Reference: Tamara
 
-Tamara is an autonomous AI operations manager built on the Nervous System framework. She manages 13 AI agents across 5 platforms, serving 175 countries from a $24/month VPS - without dedicated DevOps staff.
+Tamara is an autonomous AI operations manager built on the Nervous System framework. She manages 13 AI agents across 5 platforms, serving 175+ countries accessible from a $12/month VPS - without dedicated DevOps staff.
 
 Tamara is the proof that the Nervous System works in production. She runs 60-minute autonomous check cycles, detects configuration drift, dispatches remediation agents, and reports to the human operator only when judgment is needed.
 
@@ -168,10 +168,10 @@ From the live Palyan Family AI System deployment (Feb 28 - Mar 5, 2026):
 
 - **58+** violations caught
 - **29** edits blocked by preflight
-- **13** unique files protected
+- **100** files protected
 - **0** rules bypassed
-- **28** processes monitored
-- **7** days continuous operation
+- **27** processes monitored
+- **5** days continuous operation
 
 ## Live Demo
 
@@ -198,6 +198,12 @@ Works with the major multi-agent platforms and any MCP client:
 | **[Any MCP Client](./integrations/generic-mcp/)** | 3 lines of config | 5 min |
 
 Each integration includes working code, example configs, and a step-by-step README.
+
+## Agent Skills
+
+The Nervous System is also available as an Agent Skill following the open [Agent Skills standard](https://agentskills.io). Install the governance skill to teach any AI agent (Claude, Codex, Cursor, Copilot, VS Code) how to enforce behavioral guardrails in multi-agent systems.
+
+See `skills/multi-agent-governance/SKILL.md` for the full skill definition.
 
 ## Philosophy
 
