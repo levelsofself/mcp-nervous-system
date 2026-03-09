@@ -1147,7 +1147,7 @@ const NERVOUS_SYSTEM_INFO = {
     ]
   },
   stats: {
-    protected_files: '89+ untouchable files',
+    protected_files: '100 untouchable files',
     core_rules: 7,
     reflection_trigger: 'Every 4 messages',
     processes_managed: '22+ autonomous PM2 processes',
