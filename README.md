@@ -4,7 +4,7 @@
 
 7 mechanically enforced rules that prevent the most common failure modes when LLMs have access to real infrastructure: context loss, silent failures, file damage, goal drift, and overreach.
 
-Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan Family AI System. 21 tools including configuration drift detection and emergency kill switch. Battle-tested on a 13-agent AI family running 27 processes 24/7 on a single VPS. 58+ violations logged, 0 bypassed.
+Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan Family AI System. 19+ tools including configuration drift detection, emergency kill switch, usage monitoring, and bot compliance auditing. Battle-tested on a 13-agent AI family running 25 processes 24/7 on a $24/month VPS. SAM.gov registered (CAGE 19R10). 18 partners across 8 countries. 99+ violations caught, 0 bypassed.
 
 ## The Problem
 
@@ -124,7 +124,7 @@ Every guardrail violation, kill switch activation, and dispatch event is recorde
 
 - Use `verify_audit_chain` to walk the entire chain and verify integrity
 - Returns: valid/invalid status, entry count, and break point if tampered
-- 58+ violations logged, 0 bypassed, 0 chain breaks
+- 99+ violations caught, 0 bypassed, 0 chain breaks
 
 ## Dispatch to LLM
 
