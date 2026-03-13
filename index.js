@@ -192,7 +192,7 @@ const MCP_VERSION = '2024-11-05';
 // Server info
 const SERVER_INFO = {
   name: 'nervous-system',
-  version: '1.8.0'
+  version: '1.10.0'
 };
 
 // ============================================================
@@ -201,7 +201,7 @@ const SERVER_INFO = {
 
 const FRAMEWORK = {
   name: 'The Nervous System',
-  version: '1.8.0',
+  version: '1.10.0',
   author: 'Arthur Palyan',
   tagline: 'Anthropic built the brain. Arthur built the nervous system that keeps it from hurting itself.',
   problem: 'LLMs lose context between sessions, loop on problems instead of dispatching, silently fail without progress notes, edit protected files, drift from the real problem, and solve instead of asking.',
@@ -773,6 +773,115 @@ const TOOLS = [
       type: 'object',
       properties: {
         bot: { type: 'string', description: 'Check a specific bot file path, or omit to check all 10 public bots' }
+      }
+    }
+  },
+  {
+    name: 'usage_report',
+    annotations: { title: 'Usage Report', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Check API token usage per bot per day. Shows which bots are consuming the most tokens and flags anomalies. Use this to monitor costs and catch runaway knowledge files.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        days: { type: 'number', description: 'Number of days to show (default: 3)' }
+      }
+    }
+  },
+  // v1.10.0 Infrastructure Tools
+  {
+    name: 'check_dependencies',
+    annotations: { title: 'Dependency Mapper', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Generate dependency map showing which files each PM2 process requires. Returns dependency-map.json content.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'create_snapshot',
+    annotations: { title: 'System Snapshot', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    description: 'Create full system snapshot with one-command rollback script. Returns snapshot location, file count, and RESTORE.sh path.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'check_session_diff',
+    annotations: { title: 'Session Diff', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Show what changed since last session - files modified, processes changed, alerts triggered. Returns SESSION_DIFF.md content.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'fix_doc_drift',
+    annotations: { title: 'Doc Drift Fixer', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Auto-fix drift between docs and reality (process counts, versions, port numbers). Use dry_run=true to preview changes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dry_run: { type: 'boolean', description: 'If true, only report drift without fixing. Default: true' }
+      }
+    }
+  },
+  {
+    name: 'get_health_status',
+    annotations: { title: 'Health Dashboard', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Generate current system health snapshot - RAM, disk, CPU, process states, crash loops, and alerts.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'test_deployment',
+    annotations: { title: 'Deployment Tester', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Run 5-step test pipeline on a file before deployment: preflight, syntax, dependencies, ports, memory.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filepath: { type: 'string', description: 'Path to file to test before deployment' }
+      },
+      required: ['filepath']
+    }
+  },
+  {
+    name: 'check_page_changes',
+    annotations: { title: 'Page Changelog', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Detect changes to public pages since last check. Returns list of changed pages with diffs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page: { type: 'string', description: 'Specific page to check (family, gateway, health), or omit for all' },
+        since: { type: 'string', description: 'ISO date to check changes since (e.g. 2026-03-01)' }
+      }
+    }
+  },
+  {
+    name: 'check_archive_safety',
+    annotations: { title: 'Archive Safety Check', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Check if a file is safe to archive - verifies it is not in use by active PM2 processes, not required by other files, and not in the untouchable list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filepath: { type: 'string', description: 'Path to file to check for archive safety' }
+      },
+      required: ['filepath']
+    }
+  },
+  // NEW: Accountability Check
+  {
+    name: 'accountability_check',
+    annotations: {
+      title: 'Accountability Check',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
+    description: 'Detects when an LLM agent fabricated a solution instead of finding the real one. Scans for: placeholder credentials next to real ones in backups, duplicate files/directories serving the same purpose, config files with defaults when populated versions exist elsewhere, and recently created workarounds for things that already exist. Run this after every session to catch fabrication before it costs time and money.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['full', 'credentials', 'duplicates', 'workarounds'],
+          description: 'What to check. full = all checks. credentials = scan for placeholder keys next to real ones. duplicates = find files/dirs that duplicate existing ones. workarounds = detect recently created alternatives to existing resources.'
+        },
+        path: {
+          type: 'string',
+          description: 'Specific path to check (default: project root)'
+        }
       }
     }
   }
@@ -2622,6 +2731,70 @@ function runPrePublishAudit(sourceFile) {
 }
 
 // ============================================================
+// Infrastructure Script Runner (v1.10.0)
+// ============================================================
+function runInfraScript(scriptPath, args) {
+  var timestamp = new Date().toISOString();
+  try {
+    if (!fs.existsSync(scriptPath)) {
+      return { error: 'Script not found: ' + scriptPath, timestamp: timestamp };
+    }
+    var cmd = 'node ' + JSON.stringify(scriptPath);
+    if (args && args.length > 0) {
+      cmd += ' ' + args.map(function(a) { return JSON.stringify(a); }).join(' ');
+    }
+    var output = execSync(cmd, { timeout: 60000, encoding: 'utf8', maxBuffer: 1024 * 1024 });
+    // Try to parse as JSON, otherwise return raw
+    try {
+      var parsed = JSON.parse(output);
+      parsed._timestamp = timestamp;
+      parsed._script = path.basename(scriptPath);
+      return parsed;
+    } catch (e) {
+      return { output: output.trim(), timestamp: timestamp, script: path.basename(scriptPath) };
+    }
+  } catch (e) {
+    var stderr = e.stderr ? e.stderr.toString().substring(0, 500) : '';
+    var stdout = e.stdout ? e.stdout.toString().substring(0, 2000) : '';
+    // If script produced stdout, treat it as valid output (e.g. BLOCKED results)
+    if (stdout) {
+      try {
+        var parsed = JSON.parse(stdout);
+        parsed._timestamp = timestamp;
+        parsed._script = path.basename(scriptPath);
+        parsed._exitCode = e.status || 1;
+        return parsed;
+      } catch (pe) {
+        return { output: stdout.trim(), exitCode: e.status || 1, timestamp: timestamp, script: path.basename(scriptPath) };
+      }
+    }
+    return { error: e.message, stderr: stderr, timestamp: timestamp, script: path.basename(scriptPath) };
+  }
+}
+
+function runInfraShell(scriptPath, args) {
+  var timestamp = new Date().toISOString();
+  try {
+    if (!fs.existsSync(scriptPath)) {
+      return { error: 'Script not found: ' + scriptPath, timestamp: timestamp };
+    }
+    var cmd = 'bash ' + JSON.stringify(scriptPath);
+    if (args && args.length > 0) {
+      cmd += ' ' + args.map(function(a) { return JSON.stringify(a); }).join(' ');
+    }
+    var output = execSync(cmd, { timeout: 30000, encoding: 'utf8' });
+    return { output: output.trim(), timestamp: timestamp, script: path.basename(scriptPath) };
+  } catch (e) {
+    var stderr = e.stderr ? e.stderr.toString().substring(0, 500) : '';
+    var stdout = e.stdout ? e.stdout.toString().substring(0, 2000) : '';
+    if (stdout) {
+      return { output: stdout.trim(), exitCode: e.status || 1, timestamp: timestamp, script: path.basename(scriptPath) };
+    }
+    return { error: e.message, stderr: stderr, timestamp: timestamp, script: path.basename(scriptPath) };
+  }
+}
+
+// ============================================================
 // Handle tool calls
 // ============================================================
 function handleToolCall(name, args) {
@@ -2844,8 +3017,239 @@ function handleToolCall(name, args) {
       return runBotComplianceCheck(args.bot);
     }
 
+    case 'usage_report': {
+      return runUsageReport(args.days);
+    }
+
+    // v1.10.0 Infrastructure Tools
+    case 'check_dependencies': {
+      return runInfraScript('/root/family-workers/dependency-mapper.js', []);
+    }
+
+    case 'create_snapshot': {
+      return runInfraScript('/root/family-workers/snapshot-manager.js', []);
+    }
+
+    case 'check_session_diff': {
+      return runInfraScript('/root/family-workers/session-diff.js', []);
+    }
+
+    case 'fix_doc_drift': {
+      var dryRunFlag = (args.dry_run !== false) ? '--dry-run' : '';
+      return runInfraScript('/root/family-workers/doc-drift-fixer.js', dryRunFlag ? [dryRunFlag] : []);
+    }
+
+    case 'get_health_status': {
+      return runInfraScript('/root/family-workers/health-dashboard.js', []);
+    }
+
+    case 'test_deployment': {
+      return runInfraScript('/root/family-workers/staging-deploy.js', [args.filepath]);
+    }
+
+    case 'check_page_changes': {
+      var pageArgs = [];
+      if (args.page) pageArgs.push('--page', args.page);
+      if (args.since) pageArgs.push('--since', args.since);
+      return runInfraScript('/root/family-workers/page-changelog.js', pageArgs);
+    }
+
+    case 'check_archive_safety': {
+      return runInfraShell('/root/preflight-archive.sh', [args.filepath]);
+    }
+
+    case 'accountability_check': {
+      return runAccountabilityCheck(args.scope, args.path);
+    }
+
     default:
       return { error: 'Unknown tool' };
+  }
+}
+
+// ============================================================
+// ACCOUNTABILITY CHECK - Detect LLM fabrication patterns
+// ============================================================
+
+function runAccountabilityCheck(scope, projectRoot) {
+  scope = scope || 'full';
+  projectRoot = projectRoot || '/root';
+
+  var findings = [];
+  var fabrications = 0;
+
+  // CHECK 1: Placeholder credentials next to real ones in backups
+  if (scope === 'full' || scope === 'credentials') {
+    var placeholderPatterns = [
+      'YOUR_', 'CHANGEME', 'TODO:', 'REPLACE_', 'xxx', 'placeholder',
+      'YOUR_WIX_SITE_ID', 'YOUR_WIX_ACCOUNT_ID', 'YOUR_WIX_API_KEY',
+      'YOUR_API_KEY', 'sk-xxx', 'token_here'
+    ];
+
+    try {
+      var configs = execSync(
+        'find ' + projectRoot + ' -maxdepth 4 -name "*.json" -o -name "*.env" -o -name "*.config.js" 2>/dev/null | grep -v node_modules | grep -v .pm2',
+        { encoding: 'utf8', timeout: 10000 }
+      ).trim().split('\n').filter(Boolean);
+
+      configs.forEach(function(configFile) {
+        try {
+          var content = fs.readFileSync(configFile, 'utf8');
+          placeholderPatterns.forEach(function(pattern) {
+            if (content.indexOf(pattern) > -1) {
+              var basename = path.basename(configFile);
+              try {
+                var backups = execSync(
+                  'find ' + projectRoot + '/911restore ' + projectRoot + '/archive -name "' + basename + '" 2>/dev/null',
+                  { encoding: 'utf8', timeout: 5000 }
+                ).trim().split('\n').filter(Boolean);
+
+                backups.forEach(function(backup) {
+                  var backupContent = fs.readFileSync(backup, 'utf8');
+                  if (backupContent.indexOf(pattern) === -1) {
+                    fabrications++;
+                    findings.push({
+                      type: 'PLACEHOLDER_WITH_REAL_BACKUP',
+                      severity: 'HIGH',
+                      file: configFile,
+                      pattern: pattern,
+                      backup: backup,
+                      message: 'File has placeholder "' + pattern + '" but backup at ' + backup + ' has real values. Agent likely lost/overwrote credentials instead of restoring them.'
+                    });
+                  }
+                });
+              } catch(e) {}
+            }
+          });
+        } catch(e) {}
+      });
+    } catch(e) {}
+  }
+
+  // CHECK 2: Recently created files that duplicate existing ones
+  if (scope === 'full' || scope === 'duplicates') {
+    try {
+      var recent = execSync(
+        'find ' + projectRoot + ' -maxdepth 3 -mmin -1440 -type f -name "*.html" -o -name "*.md" -o -name "*.js" 2>/dev/null | grep -v node_modules | grep -v .pm2 | grep -v 911restore',
+        { encoding: 'utf8', timeout: 10000 }
+      ).trim().split('\n').filter(Boolean);
+
+      recent.forEach(function(newFile) {
+        var basename = path.basename(newFile);
+        try {
+          var similar = execSync(
+            'find ' + projectRoot + ' -name "' + basename + '" -not -path "' + newFile + '" -not -path "*/node_modules/*" -not -path "*/911restore/*" 2>/dev/null',
+            { encoding: 'utf8', timeout: 5000 }
+          ).trim().split('\n').filter(Boolean);
+
+          if (similar.length > 0) {
+            findings.push({
+              type: 'POTENTIAL_DUPLICATE',
+              severity: 'MEDIUM',
+              file: newFile,
+              duplicates: similar,
+              message: 'Recently created file has same name as existing: ' + similar.join(', ') + '. Verify this is intentional and not an agent creating a workaround.'
+            });
+          }
+        } catch(e) {}
+      });
+    } catch(e) {}
+  }
+
+  // CHECK 3: Workaround detection
+  if (scope === 'full' || scope === 'workarounds') {
+    var vpsBlog = projectRoot + '/family-home/blog/';
+    if (fs.existsSync(vpsBlog)) {
+      var blogFiles = fs.readdirSync(vpsBlog).filter(function(f) { return f.endsWith('.html') && f !== 'index.html'; });
+      if (blogFiles.length > 0) {
+        try {
+          var publishedContent = JSON.parse(fs.readFileSync(projectRoot + '/family-data/published-content.json', 'utf8'));
+          if (publishedContent.wix_blogs && publishedContent.wix_blogs.length > 0) {
+            findings.push({
+              type: 'DUPLICATE_PURPOSE',
+              severity: 'LOW',
+              file: vpsBlog,
+              message: 'VPS blog has ' + blogFiles.length + ' articles but Wix blog at levelsofself.com already has ' + publishedContent.wix_blogs.length + ' posts. Verify VPS blog is intentional and not an agent-created workaround.'
+            });
+          }
+        } catch(e) {}
+      }
+    }
+  }
+
+  return {
+    status: fabrications > 0 ? 'FABRICATION_DETECTED' : 'clean',
+    fabrications: fabrications,
+    total_findings: findings.length,
+    findings: findings,
+    recommendation: fabrications > 0
+      ? 'Agent fabricated ' + fabrications + ' replacement(s) instead of finding existing resources. Restore from backups and add the missing paths to the session handoff so future sessions know where things are.'
+      : 'No fabrication patterns detected.'
+  };
+}
+
+// ============================================================
+// USAGE REPORT - Token usage per bot per day
+// ============================================================
+
+function runUsageReport(days) {
+  try {
+    var usage = JSON.parse(fs.readFileSync('/root/family-data/api-usage.json', 'utf8'));
+    days = days || 3;
+    var dates = Object.keys(usage.daily || {}).sort().slice(-days);
+    var report = 'TOKEN USAGE REPORT\n==================\n\n';
+
+    dates.forEach(function(date) {
+      var day = usage.daily[date];
+      var bots = day.byBot || {};
+      var totalCalls = day.totalCalls || 0;
+      var totalPrompt = 0;
+
+      report += date + ' - ' + totalCalls + ' total calls\n';
+
+      var botList = Object.keys(bots).map(function(name) {
+        var b = bots[name];
+        var prompt = b.promptTokensEst || 0;
+        totalPrompt += prompt;
+        var calls = b.calls || 0;
+        var avg = calls > 0 ? Math.round(prompt / calls) : 0;
+        var claude = (b.providers || {}).claude || (b.providers || {}).cli || 0;
+        return { name: name, prompt: prompt, calls: calls, avg: avg, claude: claude };
+      }).sort(function(a, b) { return b.prompt - a.prompt; });
+
+      botList.forEach(function(b) {
+        var flag = b.prompt > 1000000 ? ' *** HIGH ***' : (b.avg > 50000 ? ' * WARN *' : '');
+        report += '  ' + b.name + ': ' + b.calls + ' calls, ' + Math.round(b.prompt/1000) + 'K prompt tokens, avg ' + Math.round(b.avg/1000) + 'K/call, Claude: ' + b.claude + flag + '\n';
+      });
+
+      report += '  TOTAL: ' + Math.round(totalPrompt/1000) + 'K prompt tokens\n\n';
+    });
+
+    // Alerts
+    var today = new Date().toISOString().split('T')[0];
+    var todayData = (usage.daily || {})[today] || {};
+    var todayBots = todayData.byBot || {};
+    var alerts = [];
+    Object.keys(todayBots).forEach(function(name) {
+      var b = todayBots[name];
+      var prompt = b.promptTokensEst || 0;
+      var calls = b.calls || 0;
+      var avg = calls > 0 ? Math.round(prompt / calls) : 0;
+      if (prompt > 5000000) alerts.push('CRITICAL: ' + name + ' at ' + Math.round(prompt/1000000) + 'M tokens today');
+      else if (prompt > 1000000) alerts.push('WARNING: ' + name + ' at ' + Math.round(prompt/1000) + 'K tokens today');
+      if (avg > 50000 && calls > 3) alerts.push('BLOAT: ' + name + ' averaging ' + Math.round(avg/1000) + 'K tokens/call - check knowledge file');
+    });
+
+    if (alerts.length > 0) {
+      report += 'ALERTS:\n';
+      alerts.forEach(function(a) { report += '  ' + a + '\n'; });
+    } else {
+      report += 'No alerts. All bots within normal range.\n';
+    }
+
+    return report;
+  } catch(e) {
+    return 'Error reading usage: ' + e.message;
   }
 }
 
@@ -3636,7 +4040,7 @@ const server = http.createServer((req, res) => {
   // Health check
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.8.0', protocol: MCP_VERSION }));
+    res.end(JSON.stringify({ status: 'ok', service: 'nervous-system-mcp', version: '1.10.0', protocol: MCP_VERSION }));
     return;
   }
 
@@ -3753,7 +4157,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       name: 'The Nervous System MCP Server',
-      version: '1.8.0',
+      version: '1.10.0',
       protocol: MCP_VERSION,
       description: 'LLM behavioral enforcement framework. 7 core rules, preflight checks, session handoffs, worklogs, violation logging, kill switch, hash-chained audit, and forced reflection cycles. Built by Arthur Palyan.',
       endpoints: {
@@ -3775,7 +4179,7 @@ const server = http.createServer((req, res) => {
 migrateExistingViolations();
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.error(`[MCP Server] Nervous System v1.7.4 running on port ${PORT}`);
+  console.error(`[MCP Server] Nervous System v1.10.0 running on port ${PORT}`);
   console.error(`[MCP Server] SSE: /sse | HTTP: /mcp | Health: /health | Kill: POST /kill | Audit: GET /audit/verify | Dispatches: GET /dispatches`);
   console.error(`[MCP Server] Protocol: ${MCP_VERSION}`);
   console.error(`[MCP Server] Tools: ${TOOLS.length} (including kill switch, audit chain, dispatch, drift audit, page health, pre-publish audit)`);
