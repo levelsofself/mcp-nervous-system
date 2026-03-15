@@ -2,9 +2,30 @@
 
 **LLM Behavioral Enforcement Framework**
 
+## Quick Start (2 minutes)
+
+```bash
+npx mcp-nervous-system
+# Server starts on port 3475
+```
+
+Add to Claude Code:
+```bash
+claude mcp add nervous-system npx mcp-nervous-system
+```
+
+Add to Cursor / Windsurf / Cline - use the hosted endpoint (no install):
+```
+https://api.100levelup.com/mcp-ns/
+```
+
+That's it. You now have 32 governance tools: preflight checks, audit trails, drift detection, security scans, and a kill switch.
+
+---
+
 7 mechanically enforced rules that prevent the most common failure modes when LLMs have access to real infrastructure: context loss, silent failures, file damage, goal drift, and overreach.
 
-Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan Family AI System. 30 tools including configuration drift detection, emergency kill switch, usage monitoring, and bot compliance auditing. Battle-tested on a 13-agent AI family running 29 processes 24/7 on a $24/month VPS (upgraded to 7.8GB RAM). SAM.gov registered (CAGE 19R10). 26 partners across 10 countries. 99+ violations caught, 0 bypassed.
+Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan Family AI System. 19 tools including configuration drift detection, emergency kill switch, usage monitoring, and bot compliance auditing. Battle-tested on a 13-agent AI family running 29 processes 24/7 on a $24/month VPS (upgraded to 7.8GB RAM). SAM.gov registered (CAGE 19R10). 26 partners across 10 countries. 99+ violations caught, 0 bypassed.
 
 ## The Problem
 
