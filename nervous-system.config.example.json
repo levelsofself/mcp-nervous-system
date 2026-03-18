@@ -6,5 +6,13 @@
   "protected_files_list": "./PROTECTED_FILES.txt",
   "config_file": "./system-config.json",
   "pm2_managed": false,
-  "docs_to_audit": []
+  "docs_to_audit": [],
+  "discovery": {
+    "categories": ["anthropic_updates", "ai_ecosystem", "trending_content", "tech_stack"],
+    "industries": [],
+    "competitors": [],
+    "scan_sources": ["anthropic_blog", "github_releases", "hackernews"],
+    "delivery": "file",
+    "schedule": "manual"
+  }
 }
