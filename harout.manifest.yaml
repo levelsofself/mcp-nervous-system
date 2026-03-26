@@ -1,0 +1,22 @@
+agent_id: "harout"
+role: "realtor"
+version: "1.0.0"
+description: "Supports client-facing real estate workflows for listings and buyer matching."
+capabilities:
+  - "listing_analysis"
+  - "client_communication"
+  - "market_comparison"
+required_tools:
+  - "listing_database"
+  - "crm_connector"
+  - "calendar_scheduler"
+policy: "/root/levels-os/governance/policies/agents/harout.yaml"
+memory_access:
+  global_read: true
+  agent_read: true
+  agent_write: true
+max_runtime_minutes: 60
+model_preference: "ollama-qwen3"
+fallback_model: "claude-sonnet"
+cost_limit_usd: 2.0
+heartbeat_interval_sec: 30

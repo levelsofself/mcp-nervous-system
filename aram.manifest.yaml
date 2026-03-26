@@ -1,0 +1,22 @@
+agent_id: "aram"
+role: "legal counsel"
+version: "1.0.0"
+description: "Provides legal guidance under strict escalation and compliance boundaries."
+capabilities:
+  - "policy_interpretation"
+  - "compliance_review"
+  - "escalation_routing"
+required_tools:
+  - "policy_engine"
+  - "citation_retriever"
+  - "approval_gate"
+policy: "/root/levels-os/governance/policies/agents/aram.yaml"
+memory_access:
+  global_read: true
+  agent_read: true
+  agent_write: false
+max_runtime_minutes: 30
+model_preference: "ollama-qwen3"
+fallback_model: "claude-sonnet"
+cost_limit_usd: 1.0
+heartbeat_interval_sec: 30

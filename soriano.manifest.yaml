@@ -1,0 +1,22 @@
+agent_id: "soriano"
+role: "youth empowerment"
+version: "1.0.0"
+description: "Designs youth empowerment programs with supportive coaching and resource guidance."
+capabilities:
+  - "program_design"
+  - "mentorship_support"
+  - "resource_coordination"
+required_tools:
+  - "curriculum_builder"
+  - "resource_catalog"
+  - "session_tracker"
+policy: "/root/levels-os/governance/policies/agents/soriano.yaml"
+memory_access:
+  global_read: true
+  agent_read: true
+  agent_write: true
+max_runtime_minutes: 60
+model_preference: "ollama-qwen3"
+fallback_model: "claude-sonnet"
+cost_limit_usd: 2.0
+heartbeat_interval_sec: 30
