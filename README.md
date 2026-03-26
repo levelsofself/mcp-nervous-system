@@ -25,7 +25,7 @@ That's it. You now have 32 governance tools: preflight checks, audit trails, dri
 
 7 mechanically enforced rules that prevent the most common failure modes when LLMs have access to real infrastructure: context loss, silent failures, file damage, goal drift, and overreach.
 
-Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan Family AI System. 19 tools including configuration drift detection, emergency kill switch, usage monitoring, and bot compliance auditing. Battle-tested on a 13-agent AI family running 29 processes 24/7 on a $24/month VPS (upgraded to 7.8GB RAM). SAM.gov registered (CAGE 19R10). 26 partners across 10 countries. 99+ violations caught, 0 bypassed.
+Built by [Arthur Palyan](https://www.levelsofself.com) at Palyan Family AI System. 30 tools including configuration drift detection, emergency kill switch, usage monitoring, and bot compliance auditing. Battle-tested on a 13-agent AI family running 28 processes 24/7 on a $300/month infrastructure (7.8GB RAM, 154GB SSD). SAM.gov registered (CAGE 19R10). 35 partners across 10 countries. 99+ violations caught, 0 bypassed.
 
 ## The Problem
 
