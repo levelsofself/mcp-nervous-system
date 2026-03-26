@@ -1,0 +1,24 @@
+agent_id: "lady"
+role: "5-lane executor"
+version: "1.0.0"
+description: "Executes parallel workstreams across five lanes with synchronized delivery control."
+capabilities:
+  - "parallel_execution"
+  - "priority_routing"
+  - "status_synchronization"
+  - "handoff_coordination"
+required_tools:
+  - "lane_orchestrator"
+  - "task_dispatcher"
+  - "status_board"
+  - "audit_logger"
+policy: "/root/levels-os/governance/policies/agents/lady.yaml"
+memory_access:
+  global_read: true
+  agent_read: true
+  agent_write: true
+max_runtime_minutes: 60
+model_preference: "ollama-qwen3"
+fallback_model: "claude-sonnet"
+cost_limit_usd: 2.0
+heartbeat_interval_sec: 30

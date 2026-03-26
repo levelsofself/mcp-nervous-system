@@ -1,0 +1,22 @@
+agent_id: "roman"
+role: "teacher/content"
+version: "1.0.0"
+description: "Creates educational content and lesson structures for clear learning outcomes."
+capabilities:
+  - "curriculum_planning"
+  - "content_authoring"
+  - "knowledge_assessment"
+required_tools:
+  - "content_editor"
+  - "rubric_generator"
+  - "reference_retriever"
+policy: "/root/levels-os/governance/policies/agents/roman.yaml"
+memory_access:
+  global_read: true
+  agent_read: true
+  agent_write: true
+max_runtime_minutes: 60
+model_preference: "ollama-qwen3"
+fallback_model: "claude-sonnet"
+cost_limit_usd: 2.0
+heartbeat_interval_sec: 30
