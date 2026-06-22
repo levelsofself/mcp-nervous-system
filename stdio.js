@@ -37,7 +37,7 @@ const TOOLS = [
   { name: "dispatch_to_llm", description: "Dispatch a task to a background Claude Code agent", schema: { type: "object", properties: { task: { type: "string", description: "Task description" }, max_turns: { type: "number", description: "Max turns (default 15)" } }, required: ["task"] } }
 ];
 
-const server = new Server({ name: "nervous-system", version: "1.9.0" }, { capabilities: { tools: {}, resources: {} } });
+const server = new Server({ name: "nervous-system", version: "1.11.1" }, { capabilities: { tools: {}, resources: {} } });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: TOOLS.map(t => ({ name: t.name, description: t.description, inputSchema: t.schema }))
@@ -48,10 +48,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   
   switch (name) {
     case "get_framework":
-      return { content: [{ type: "text", text: JSON.stringify({ name: "The Nervous System", version: "1.9.0", description: "LLM Behavioral Enforcement Framework", rules: RULES, total_tools: 11, production_stats: { violations_caught: 58, rules_bypassed: 0, edits_blocked: 32, processes_monitored: 22 } }, null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ name: "The Nervous System", version: "1.11.1", description: "LLM Behavioral Enforcement Framework", rules: RULES, total_tools: 11, production_stats: { violations_caught: 58, rules_bypassed: 0, edits_blocked: 32, processes_monitored: 22 } }, null, 2) }] };
     
     case "get_nervous_system_info":
-      return { content: [{ type: "text", text: JSON.stringify({ name: "The Nervous System", version: "1.9.0", author: "Arthur Palyan", company: "Arthur Palyan dba Levels Of Self", website: "https://www.levelsofself.com", demo: "https://api.100levelup.com/family/arthur.html?guest=1", github: "https://github.com/levelsofself/mcp-nervous-system", npm: "https://www.npmjs.com/package/mcp-nervous-system", tools: 11, rules: 7, production_stats: { violations: 58, bypasses: 0, blocked_edits: 32, uptime_days: 25, monthly_cost: "under $500/month" } }, null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ name: "The Nervous System", version: "1.11.1", author: "Arthur Palyan", company: "Arthur Palyan dba Levels Of Self", website: "https://www.levelsofself.com", demo: "https://api.100levelup.com/family/arthur.html?guest=1", github: "https://github.com/levelsofself/mcp-nervous-system", npm: "https://www.npmjs.com/package/mcp-nervous-system", tools: 11, rules: 7, production_stats: { violations: 58, bypasses: 0, blocked_edits: 32, uptime_days: 25, monthly_cost: "under $500/month" } }, null, 2) }] };
     
     case "check_preflight":
       const fp = args?.file_path || "unknown";
@@ -100,7 +100,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(RULES, null, 2) }] };
   }
   if (uri === "ns://stats") {
-    return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify({ violations: 58, bypasses: 0, blocked: 32, processes: 22, uptime_days: 25, version: "1.9.0" }, null, 2) }] };
+    return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify({ violations: 58, bypasses: 0, blocked: 32, processes: 22, uptime_days: 25, version: "1.11.1" }, null, 2) }] };
   }
   return { contents: [{ uri, mimeType: "text/plain", text: "Unknown resource" }] };
 });
