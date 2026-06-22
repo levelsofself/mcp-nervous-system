@@ -546,7 +546,7 @@ const NERVOUS_SYSTEM_INFO = {
     ]
   },
   origin_story: {
-    context: 'Arthur Palyan runs a startup with 12 AI family members, each with distinct roles. The entire operation runs on a $24/month VPS with a $200/month LLM subscription.',
+    context: 'Arthur Palyan runs a startup with 12 AI family members, each with distinct roles. The entire operation runs on a ~$48/month VPS with a $200/month LLM subscription, about $375/month all in.',
     problem_discovered: 'After months of building, patterns emerged: LLMs would break working systems while trying to improve them. They would loop on debugging instead of dispatching. They would silently fail when sessions timed out. They would lose all context between sessions.',
     solution_built: 'Arthur built the nervous system - not by changing the LLM model, but by wrapping it in behavioral rules enforced through scripts, file checks, and prompt engineering. The LLM itself became the enforcement mechanism, trained to check before acting.',
     philosophy: 'The brain (LLM) is powerful but needs a nervous system to keep it from hurting itself. Just like a human nervous system sends pain signals before you touch a hot stove, this system sends BLOCKED/PROTECTED signals before the LLM edits a critical file.',
@@ -578,7 +578,7 @@ const NERVOUS_SYSTEM_INFO = {
     reflection_trigger: 'Every 4 messages',
     processes_managed: '22+ autonomous PM2 processes',
     family_members: 12,
-    monthly_cost: 'Under $300/month total infrastructure',
+    monthly_cost: 'Under $500/month total infrastructure (about $375 actual)',
     uptime: '24/7 autonomous operation',
     deployment: 'Single VPS, single LLM subscription'
   }
@@ -940,7 +940,7 @@ const RESOURCES = [
   { uri: 'nervous-system://templates', name: 'Templates', description: 'Ready-to-use templates for handoffs, worklogs, preflight, and untouchable lists', mimeType: 'text/plain' },
   { uri: 'nervous-system://drift-audit', name: 'Drift Audit', description: 'Configuration drift detection - checks roles, versions, file references, and running processes against source-of-truth files', mimeType: 'text/plain' },
   { uri: 'nervous-system://tamara-reference', name: 'Tamara Reference Implementation', description: 'Autonomous AI operations manager - reference implementation for managing AI agent fleets using the Nervous System framework', mimeType: 'text/plain' },
-  { uri: 'nervous-system://case-study', name: 'Palyan Family AI System Case Study', description: 'Production case study: 13 agents, 5 platforms, 175 countries, $24/month - autonomous AI operations at scale', mimeType: 'text/plain' },
+  { uri: 'nervous-system://case-study', name: 'Palyan Family AI System Case Study', description: 'Production case study: 13 agents, 5 platforms, 175 countries, under $500/month - autonomous AI operations at scale', mimeType: 'text/plain' },
 ];
 
 // ============================================================
@@ -4210,7 +4210,7 @@ PRODUCTION RESULTS
 - 13 AI agents managed autonomously
 - 5 platforms (Telegram, Instagram, Facebook, Web, Bot Builder)
 - 175 countries served
-- $24/month total infrastructure cost
+- Under $500/month total infrastructure cost (about $375 actual)
 - Zero dedicated DevOps staff
 - 99+ protected files with automated enforcement
 - Autonomous operation for weeks without human intervention
@@ -4235,7 +4235,7 @@ Open source: npmjs.com/package/mcp-nervous-system`;
 Autonomous AI Operations at Scale
 
 OVERVIEW
-The Palyan Family AI System is a production deployment of 13 specialized AI agents serving users across 175 countries through 5 platforms. The entire operation runs on a single 4GB VPS for $24/month, managed autonomously by Tamara - an AI operations manager built on the Nervous System framework.
+The Palyan Family AI System is a production deployment of 13 specialized AI agents serving users across 175 countries through 5 platforms. The entire operation runs on a single 4GB VPS for about $48/month, managed autonomously by Tamara - an AI operations manager built on the Nervous System framework.
 
 This is not a demo. This is a live system that has been running continuously since February 2026, processing real user interactions, managing real infrastructure, and operating without dedicated DevOps staff.
 
@@ -4258,7 +4258,7 @@ INFRASTRUCTURE
 - Server: 4GB VPS (Ubuntu)
 - Process Manager: PM2 (29 registered processes, 19+ online)
 - LLM Access: Anthropic Max subscription
-- Total Monthly Cost: $24 (VPS $12 + domain/misc $12)
+- Total Monthly Cost: ~$375 (VPS ~$48 + LLM ~$200 + Vercel/insurance/tools)
 - Platforms: Telegram, Instagram, Facebook Messenger, Web, Bot Builder SaaS
 
 GOVERNANCE LAYER
