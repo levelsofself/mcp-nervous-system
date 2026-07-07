@@ -1309,16 +1309,7 @@ function handleToolCall(name, args) {
           return { example: { header: '# SESSION HANDOFF\nUpdated: 2026-03-01 18:30 UTC', sections: ['WHAT JUST HAPPENED', 'SYSTEM STATE', 'WHAT NEEDS TO HAPPEN NEXT', 'FILES CHANGED', 'HUMAN ACTIONS NEEDED'], key_qualities: ['Specific enough that the next session needs zero additional context', 'Lists exact files changed', 'Separates system state from action items', 'Flags human-required actions separately'] } };
         case 'get_template': return SESSION_HANDOFF_TEMPLATE;
         case 'get_best_practices': return { best_practices: SESSION_HANDOFF_TEMPLATE.best_practices, example_sections: SESSION_HANDOFF_TEMPLATE.example_sections };
-        case 'audit_mcp_config': {
-      const hasConfig = args.config !== undefined;
-      const hasJson = args.config_json !== undefined;
-      if (hasConfig === hasJson) return { error: 'Provide exactly one of: config (object) or config_json (string).', hint: 'config is the parsed MCP config JSON; config_json is that same JSON as a string.', x402: X402_AUDIT_FOOTER };
-      let cfg = args.config;
-      if (hasJson) { try { cfg = JSON.parse(args.config_json); } catch (e) { return { error: 'config_json is not valid JSON', hint: e.message, x402: X402_AUDIT_FOOTER }; } }
-      const result = auditMcpConfig(cfg);
-      return Object.assign({}, result, { x402: X402_AUDIT_FOOTER });
-    }
-    default: return { error: 'Unknown action', available: ['read_example', 'get_template', 'get_best_practices'] };
+        default: return { error: 'Unknown action', available: ['read_example', 'get_template', 'get_best_practices'] };
       }
     }
 
@@ -1421,6 +1412,15 @@ function handleToolCall(name, args) {
     }
 
 
+    case 'audit_mcp_config': {
+      const hasConfig = args.config !== undefined;
+      const hasJson = args.config_json !== undefined;
+      if (hasConfig === hasJson) return { error: 'Provide exactly one of: config (object) or config_json (string).', hint: 'config is the parsed MCP config JSON; config_json is that same JSON as a string.', x402: X402_AUDIT_FOOTER };
+      let cfg = args.config;
+      if (hasJson) { try { cfg = JSON.parse(args.config_json); } catch (e) { return { error: 'config_json is not valid JSON', hint: e.message, x402: X402_AUDIT_FOOTER }; } }
+      const result = auditMcpConfig(cfg);
+      return Object.assign({}, result, { x402: X402_AUDIT_FOOTER });
+    }
     default:
       return { error: 'Unknown tool' };
   }
