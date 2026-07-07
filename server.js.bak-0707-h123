@@ -4,8 +4,6 @@ const SERVER_NAME_ID = 'nervous-system';
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const fs = require('fs');
-const { auditMcpConfig } = require('./lib/mcp-audit');
-const X402_AUDIT_FOOTER = 'Hosted CI/agent version (pay-per-call, x402): POST https://api.100levelup.com/x402/audit-mcp ($0.05 USDC on Base). Discovery: https://api.100levelup.com/openapi.json';
 
 const PORT = 3475;
 
@@ -1279,12 +1277,6 @@ const TOOLS = [
       required: ['message']
     }
   }
-,{
-    name: 'audit_mcp_config',
-    annotations: { title: 'Audit MCP Config (Governance Lint)', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    description: 'Governance lint for MCP server configurations (free, local). Checks: plaintext secrets in env, unpinned packages, auto-install flags, broad filesystem scopes, shell wrappers, non-TLS remote transports, unpinned docker tags. Returns findings with severities and a 0-100 score.',
-    inputSchema: { type: 'object', properties: { config: { type: 'object', description: 'The MCP config JSON as an object. Provide this OR config_json, not both.' }, config_json: { type: 'string', description: 'The MCP config JSON as a string; it will be parsed. Provide this OR config, not both.' } } }
-  }
 ];
 
 // Resource definitions
@@ -1309,16 +1301,7 @@ function handleToolCall(name, args) {
           return { example: { header: '# SESSION HANDOFF\nUpdated: 2026-03-01 18:30 UTC', sections: ['WHAT JUST HAPPENED', 'SYSTEM STATE', 'WHAT NEEDS TO HAPPEN NEXT', 'FILES CHANGED', 'HUMAN ACTIONS NEEDED'], key_qualities: ['Specific enough that the next session needs zero additional context', 'Lists exact files changed', 'Separates system state from action items', 'Flags human-required actions separately'] } };
         case 'get_template': return SESSION_HANDOFF_TEMPLATE;
         case 'get_best_practices': return { best_practices: SESSION_HANDOFF_TEMPLATE.best_practices, example_sections: SESSION_HANDOFF_TEMPLATE.example_sections };
-        case 'audit_mcp_config': {
-      const hasConfig = args.config !== undefined;
-      const hasJson = args.config_json !== undefined;
-      if (hasConfig === hasJson) return { error: 'Provide exactly one of: config (object) or config_json (string).', hint: 'config is the parsed MCP config JSON; config_json is that same JSON as a string.', x402: X402_AUDIT_FOOTER };
-      let cfg = args.config;
-      if (hasJson) { try { cfg = JSON.parse(args.config_json); } catch (e) { return { error: 'config_json is not valid JSON', hint: e.message, x402: X402_AUDIT_FOOTER }; } }
-      const result = auditMcpConfig(cfg);
-      return Object.assign({}, result, { x402: X402_AUDIT_FOOTER });
-    }
-    default: return { error: 'Unknown action', available: ['read_example', 'get_template', 'get_best_practices'] };
+        default: return { error: 'Unknown action', available: ['read_example', 'get_template', 'get_best_practices'] };
       }
     }
 
