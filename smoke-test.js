@@ -13,6 +13,7 @@ const PORT = parseInt(args.find(a => /^\d+$/.test(a))) || 3475;
 const PRE_PUBLISH = args.includes('--pre-publish');
 const VERBOSE = args.includes('--verbose');
 const FRESH_INSTALL = args.includes('--fresh-install');
+const OFFLINE = args.includes('--offline'); // run only offline checks (no running server needed)
 
 // All 16 tools with minimal valid arguments
 const TOOL_TESTS = [
@@ -30,6 +31,7 @@ const TOOL_TESTS = [
   { name: 'verify_audit_chain', args: {}, expectType: 'object' },
   { name: 'auto_propagate', args: {}, expectType: 'object' },
   { name: 'session_close', args: {}, expectType: 'object' },
+  { name: 'audit_mcp_config', args: { config: { mcpServers: { demo: { command: 'node', args: ['server.js'] } } } }, expectFields: ['score', 'findings', 'summary'] },
   // dispatch_to_llm - skip in smoke test (spawns real agent)
   // emergency_kill_switch - skip in smoke test (stops everything)
 ];
@@ -424,6 +426,45 @@ async function testFreshInstall() {
   }
 }
 
+// Offline unit check for the audit_mcp_config analyzer (no running server required).
+async function testAuditMcpOffline() {
+  log('\n[OFFLINE] AUDIT_MCP_CONFIG ANALYZER');
+  let auditMcpConfig;
+  try {
+    ({ auditMcpConfig } = require('./lib/mcp-audit'));
+  } catch (e) {
+    failed++;
+    failures.push({ test: 'audit_mcp_require', error: e.message });
+    log('  FAIL: could not require ./lib/mcp-audit - ' + e.message);
+    return;
+  }
+
+  // Bad fixture: inline credential in env -> expect a SECRET_IN_ENV error and score < 70.
+  const badCfg = { mcpServers: { leaky: { command: 'npx', args: ['-y', 'some-mcp-server'], env: { API_KEY: 'inline-plaintext-placeholder-value' } } } };
+  const bad = auditMcpConfig(badCfg);
+  const hasSecret = Array.isArray(bad.findings) && bad.findings.some(f => f.code === 'SECRET_IN_ENV');
+  if (hasSecret && typeof bad.score === 'number' && bad.score < 70) {
+    passed++;
+    log('  PASS: bad fixture -> SECRET_IN_ENV finding, score ' + bad.score + ' (<70)');
+  } else {
+    failed++;
+    failures.push({ test: 'audit_mcp_bad_fixture', error: 'expected SECRET_IN_ENV + score<70, got ' + JSON.stringify({ hasSecret, score: bad.score }) });
+    log('  FAIL: bad fixture - expected SECRET_IN_ENV + score<70, got score ' + bad.score + ' hasSecret=' + hasSecret);
+  }
+
+  // Clean fixture: pinned package, secret via env ref, no risky flags -> expect score 100.
+  const cleanCfg = { mcpServers: { safe: { command: 'npx', args: ['mcp-nervous-system@1.12.0'], env: { API_KEY: '${API_KEY}' } } } };
+  const clean = auditMcpConfig(cleanCfg);
+  if (clean.score === 100) {
+    passed++;
+    log('  PASS: clean fixture -> score 100');
+  } else {
+    failed++;
+    failures.push({ test: 'audit_mcp_clean_fixture', error: 'expected score 100, got ' + clean.score + ' findings=' + JSON.stringify(clean.findings) });
+    log('  FAIL: clean fixture - expected score 100, got ' + clean.score);
+  }
+}
+
 async function run() {
   log('===========================================');
   log('  NERVOUS SYSTEM SMOKE TEST');
@@ -432,13 +473,16 @@ async function run() {
   log('  Time: ' + new Date().toISOString());
   log('===========================================');
 
-  await testHealth();
-  await testInitialize();
-  await testToolsList();
-  await testEachTool();
+  if (!OFFLINE) {
+    await testHealth();
+    await testInitialize();
+    await testToolsList();
+    await testEachTool();
+  }
   await testSourceCode();
+  await testAuditMcpOffline();
 
-  if (FRESH_INSTALL || PRE_PUBLISH) {
+  if (!OFFLINE && (FRESH_INSTALL || PRE_PUBLISH)) {
     await testFreshInstall();
   }
 
