@@ -12,6 +12,10 @@ const {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema
 } = require("@modelcontextprotocol/sdk/types.js");
+const { auditMcpConfig } = require("./lib/mcp-audit");
+
+// Discovery footer for the paid, hosted x402 counterpart of the free/local audit_mcp_config tool.
+const X402_AUDIT_FOOTER = "Hosted CI/agent version (pay-per-call, x402): POST https://api.100levelup.com/x402/audit-mcp ($0.05 USDC on Base). Discovery: https://api.100levelup.com/openapi.json";
 
 const RULES = [
   { id: 1, name: "Preflight Check", short: "Run preflight.sh before any file edit", detail: "Before editing ANY file, run /root/preflight.sh to check against UNTOUCHABLE list. If blocked, STOP and report. Never rationalize past a block." },
@@ -34,7 +38,8 @@ const TOOLS = [
   { name: "get_dispatch_template", description: "Get a task file template for dispatching agents", schema: { type: "object", properties: {} } },
   { name: "emergency_kill_switch", description: "Emergency stop all agents (requires KILL_SECRET env var)", schema: { type: "object", properties: { reason: { type: "string", description: "Reason for kill" } }, required: ["reason"] } },
   { name: "verify_audit_chain", description: "Verify the tamper-evident SHA-256 audit trail", schema: { type: "object", properties: {} } },
-  { name: "dispatch_to_llm", description: "Dispatch a task to a background Claude Code agent", schema: { type: "object", properties: { task: { type: "string", description: "Task description" }, max_turns: { type: "number", description: "Max turns (default 15)" } }, required: ["task"] } }
+  { name: "dispatch_to_llm", description: "Dispatch a task to a background Claude Code agent", schema: { type: "object", properties: { task: { type: "string", description: "Task description" }, max_turns: { type: "number", description: "Max turns (default 15)" } }, required: ["task"] } },
+  { name: "audit_mcp_config", description: "Governance lint for MCP server configurations (free, local). Checks: plaintext secrets in env, unpinned packages, auto-install flags, broad filesystem scopes, shell wrappers, non-TLS remote transports, unpinned docker tags. Returns findings with severities and a 0-100 score.", schema: { type: "object", properties: { config: { type: "object", description: "The MCP config JSON as an object (e.g. claude_desktop_config.json content). Provide this OR config_json, not both." }, config_json: { type: "string", description: "The MCP config JSON as a string; it will be parsed. Provide this OR config, not both." } } } }
 ];
 
 const server = new Server({ name: "nervous-system", version: "1.11.1" }, { capabilities: { tools: {}, resources: {} } });
@@ -82,6 +87,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "dispatch_to_llm":
       return { content: [{ type: "text", text: `DISPATCH: Task received: "${args?.task || 'no task'}". In local/stdio mode, dispatch with:\nnohup claude -p "${args?.task}" --max-turns ${args?.max_turns || 15} > /tmp/dispatch-${Date.now()}.log 2>&1 &` }] };
     
+    case "audit_mcp_config": {
+      const hasConfig = args?.config !== undefined;
+      const hasJson = args?.config_json !== undefined;
+      if (hasConfig === hasJson) {
+        return { content: [{ type: "text", text: JSON.stringify({ error: "Provide exactly one of: config (object) or config_json (string).", hint: "config is the parsed MCP config JSON; config_json is that same JSON as a string." }, null, 2) }] };
+      }
+      let cfg = args.config;
+      if (hasJson) {
+        try { cfg = JSON.parse(args.config_json); }
+        catch (e) { return { content: [{ type: "text", text: JSON.stringify({ error: "config_json is not valid JSON", hint: e.message }, null, 2) }] }; }
+      }
+      const result = auditMcpConfig(cfg);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) + "\n\n" + X402_AUDIT_FOOTER }] };
+    }
+
     default:
       return { content: [{ type: "text", text: `Unknown tool: ${name}` }] };
   }
