@@ -1,13 +1,13 @@
 {
   "name": "mcp-nervous-system",
-  "version": "1.12.0",
-  "description": "Governance layer for multi-agent AI systems. 7 mechanically enforced rules, 30 tools including kill switch, audit chain, dispatch, drift audit, security audit, page health, pre-publish audit, and session close. Works with Ruflo, Hivemind, Agent Teams, and any MCP client.",
-  "main": "server.js",
+  "version": "1.12.1",
+  "description": "Governance framework for LLM agents: the 7 mechanically-enforced rules plus read-only reference tools (handoff and worklog templates, preflight guidance, origin story). Safe to run in any MCP client. The full write-capable toolset (kill switch, dispatch, drift/security audits, session close) runs on the hosted server at api.100levelup.com.",
+  "main": "stdio.js",
   "bin": {
     "mcp-nervous-system": "./stdio.js"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node stdio.js"
   },
   "keywords": [
     "mcp",
@@ -44,5 +44,12 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"
   },
-  "mcpName": "io.github.levelsofself/nervous-system"
+  "mcpName": "io.github.levelsofself/nervous-system",
+  "files": [
+    "stdio.js",
+    "lib/",
+    "README.md",
+    "LICENSE",
+    "nervous-system.config.example.json"
+  ]
 }
