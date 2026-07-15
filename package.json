@@ -1,7 +1,7 @@
 {
   "name": "mcp-nervous-system",
-  "version": "1.12.1",
-  "description": "Governance framework for LLM agents: the 7 mechanically-enforced rules plus read-only reference tools (handoff and worklog templates, preflight guidance, origin story). Safe to run in any MCP client. The full write-capable toolset (kill switch, dispatch, drift/security audits, session close) runs on the hosted server at api.100levelup.com.",
+  "version": "2.0.0",
+  "description": "Deterministic governance lint for MCP server configurations, plus reference tools for the 7 rules. audit_mcp_config and check_preflight do real work locally. Every other tool is named get_* because it returns instructions, not actions. The write-capable toolset runs on the hosted server at api.100levelup.com.",
   "main": "stdio.js",
   "bin": {
     "mcp-nervous-system": "./stdio.js"

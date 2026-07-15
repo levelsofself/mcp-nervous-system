@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.levelsofself/nervous-system",
-  "description": "Governance for LLM agents: 7 enforced rules + read-only reference tools. Safe in any MCP client.",
+  "description": "Deterministic MCP config governance lint + reference tools for the 7 rules. Tools that only return instructions are named get_*.",
   "repository": {
     "url": "https://github.com/levelsofself/mcp-nervous-system",
     "source": "github"
   },
-  "version": "1.12.1",
+  "version": "2.0.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "mcp-nervous-system",
-      "version": "1.12.1",
+      "version": "2.0.0",
       "transport": {
         "type": "stdio"
       }

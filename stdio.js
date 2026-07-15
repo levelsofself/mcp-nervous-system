@@ -12,7 +12,20 @@ const {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema
 } = require("@modelcontextprotocol/sdk/types.js");
+const fs = require("fs");
+const path = require("path");
 const { auditMcpConfig } = require("./lib/mcp-audit");
+
+// Resolve the protected-files list from env or nervous-system.config.json.
+// Returns null when nothing is configured, so the tool can say so instead of guessing.
+function loadProtectedListPath() {
+  if (process.env.NERVOUS_SYSTEM_PROTECTED_LIST) return process.env.NERVOUS_SYSTEM_PROTECTED_LIST;
+  const cfgPath = process.env.NERVOUS_SYSTEM_CONFIG || path.join(process.cwd(), "nervous-system.config.json");
+  try {
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    return cfg.protected_files_list || null;
+  } catch { return null; }
+}
 
 // Discovery footer for the paid, hosted x402 counterpart of the free/local audit_mcp_config tool.
 const X402_AUDIT_FOOTER = "Hosted CI/agent version (pay-per-call, x402): POST https://api.100levelup.com/x402/audit-mcp ($0.05 USDC on Base). Discovery: https://api.100levelup.com/openapi.json";
@@ -36,13 +49,13 @@ const TOOLS = [
   { name: "get_worklog_format", description: "Get the worklog entry format", schema: { type: "object", properties: {} } },
   { name: "get_step_back_prompt", description: "Get a step-back reflection prompt", schema: { type: "object", properties: {} } },
   { name: "get_dispatch_template", description: "Get a task file template for dispatching agents", schema: { type: "object", properties: {} } },
-  { name: "emergency_kill_switch", description: "Emergency stop all agents (requires KILL_SECRET env var)", schema: { type: "object", properties: { reason: { type: "string", description: "Reason for kill" } }, required: ["reason"] } },
-  { name: "verify_audit_chain", description: "Verify the tamper-evident SHA-256 audit trail", schema: { type: "object", properties: {} } },
-  { name: "dispatch_to_llm", description: "Dispatch a task to a background Claude Code agent", schema: { type: "object", properties: { task: { type: "string", description: "Task description" }, max_turns: { type: "number", description: "Max turns (default 15)" } }, required: ["task"] } },
+  { name: "get_kill_switch_instructions", description: "Returns the command to stop the fleet. This tool does NOT stop anything; it prints instructions. Enforcement is server-side.", schema: { type: "object", properties: { reason: { type: "string", description: "Reason for kill" } }, required: ["reason"] } },
+  { name: "get_audit_verification_instructions", description: "Returns how to verify the hash-chained audit trail. This tool does NOT verify anything; verification needs the chain file, which is server-side.", schema: { type: "object", properties: {} } },
+  { name: "get_dispatch_command", description: "Returns a ready-to-run background dispatch command. This tool does NOT dispatch anything; you run the command.", schema: { type: "object", properties: { task: { type: "string", description: "Task description" }, max_turns: { type: "number", description: "Max turns (default 15)" } }, required: ["task"] } },
   { name: "audit_mcp_config", description: "Governance lint for MCP server configurations (free, local). Checks: plaintext secrets in env, unpinned packages, auto-install flags, broad filesystem scopes, shell wrappers, non-TLS remote transports, unpinned docker tags. Returns findings with severities and a 0-100 score.", schema: { type: "object", properties: { config: { type: "object", description: "The MCP config JSON as an object (e.g. claude_desktop_config.json content). Provide this OR config_json, not both." }, config_json: { type: "string", description: "The MCP config JSON as a string; it will be parsed. Provide this OR config, not both." } } } }
 ];
 
-const server = new Server({ name: "nervous-system", version: "1.12.1" }, { capabilities: { tools: {}, resources: {} } });
+const server = new Server({ name: "nervous-system", version: "2.0.0" }, { capabilities: { tools: {}, resources: {} } });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: TOOLS.map(t => ({ name: t.name, description: t.description, inputSchema: t.schema }))
@@ -53,18 +66,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   
   switch (name) {
     case "get_framework":
-      return { content: [{ type: "text", text: JSON.stringify({ name: "The Nervous System", version: "1.12.1", description: "LLM Behavioral Enforcement Framework", rules: RULES, total_tools: 11, production_stats: { violations_caught: 58, rules_bypassed: 0, edits_blocked: 32, processes_monitored: 22 } }, null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ name: "The Nervous System", version: "2.0.0", description: "LLM Behavioral Enforcement Framework", rules: RULES, total_tools: 11, production_stats: { violations_caught: 58, rules_bypassed: 0, edits_blocked: 32, processes_monitored: 22 } }, null, 2) }] };
     
     case "get_nervous_system_info":
-      return { content: [{ type: "text", text: JSON.stringify({ name: "The Nervous System", version: "1.12.1", author: "Arthur Palyan", company: "Arthur Palyan dba Levels Of Self", website: "https://www.levelsofself.com", demo: "https://api.100levelup.com/family/arthur.html?guest=1", github: "https://github.com/levelsofself/mcp-nervous-system", npm: "https://www.npmjs.com/package/mcp-nervous-system", tools: 11, rules: 7, production_stats: { violations: 58, bypasses: 0, blocked_edits: 32, uptime_days: 25, monthly_cost: "under $500/month" } }, null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ name: "The Nervous System", version: "2.0.0", author: "Arthur Palyan", company: "Arthur Palyan dba Levels Of Self", website: "https://www.levelsofself.com", demo: "https://api.100levelup.com/family/arthur.html?guest=1", github: "https://github.com/levelsofself/mcp-nervous-system", npm: "https://www.npmjs.com/package/mcp-nervous-system", tools: 11, rules: 7, production_stats: { violations: 58, bypasses: 0, blocked_edits: 32, uptime_days: 25, monthly_cost: "under $500/month" } }, null, 2) }] };
     
-    case "check_preflight":
-      const fp = args?.file_path || "unknown";
-      const isProtected = fp.includes("llm-bridge") || fp.includes("tamara-v5") || fp.includes("tamara-team-responder");
-      return { content: [{ type: "text", text: isProtected ? `BLOCKED: ${fp} is UNTOUCHABLE. Do not edit.` : `OK: ${fp} is not protected. You may edit it.` }] };
+    case "check_preflight": {
+      // Reads the protected list that nervous-system.config.json already declares.
+      // No hardcoded paths: a list from another machine cannot protect yours.
+      const fp = args?.file_path || "";
+      if (!fp) return { content: [{ type: "text", text: "ERROR: file_path is required." }] };
+      const listPath = loadProtectedListPath();
+      if (!listPath) {
+        return { content: [{ type: "text", text: `NO LIST CONFIGURED: nothing is protected on this machine. Set "protected_files_list" in nervous-system.config.json (or NERVOUS_SYSTEM_PROTECTED_LIST) to a file of absolute paths, one per line. Until then this tool cannot answer for ${fp} and will not pretend to.` }] };
+      }
+      let entries;
+      try {
+        entries = fs.readFileSync(listPath, "utf8").split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("#"));
+      } catch (e) {
+        return { content: [{ type: "text", text: `FAIL-CLOSED: protected list at ${listPath} is unreadable (${e.code || e.message}). Treating ${fp} as PROTECTED. Fix the list before editing.` }] };
+      }
+      const base = "/" + path.basename(fp);
+      const hit = entries.find(e => e === fp || e.endsWith(base));
+      return { content: [{ type: "text", text: hit
+        ? `BLOCKED: ${fp} matches protected entry "${hit}" in ${listPath}. Do not edit without explicit human approval.`
+        : `OK: ${fp} is not in ${listPath} (${entries.length} entries). You may edit it.` }] };
+    }
     
     case "get_origin_story":
-      return { content: [{ type: "text", text: "The Nervous System was born from watching AI agents break production systems repeatedly. Arthur Palyan runs about 12 AI processes on a ~$48/month VPS - 12 specialized agents handling email, jobs, coaching, translation, content, and operations 24/7. Without governance, agents would edit critical configs, loop on debug sessions, time out without records, and drift from objectives. System prompts didn't work - the LLM would agree to every rule then violate them within minutes. So we built mechanical enforcement: a bash script (preflight.sh) that blocks edits before they happen, a hash-chained audit trail that can't be tampered with, and a kill switch for emergencies. 56 violations caught, 0 bypassed. The AI can't rationalize past a bash script." }] };
+      return { content: [{ type: "text", text: "The Nervous System came out of watching LLM agents break production systems. System prompts did not work: the model would agree to every rule and violate it minutes later. So the rules were made mechanical instead of advisory: a preflight script that blocks an edit before it happens, a hash-chained audit trail, and a kill switch. The lesson that matters: an agent cannot rationalize past a bash script. Note on numbers: this tool used to hardcode fleet sizes and violation counts. They were removed on 2026-07-15 because a number baked into a package is a fossil the moment it ships. For live counts, query the hosted server, which reads them at request time." }] };
     
     case "get_handoff_template":
       return { content: [{ type: "text", text: "# SESSION HANDOFF\n\n## WHAT JUST HAPPENED\n[Summary of last session]\n\n## COMPLETED\n[List of completed items]\n\n## STILL PENDING\n[List of pending items]\n\n## SYSTEM STATE\n- PM2 processes: [count] online\n- Violations: [count], bypasses: [count]\n- Key metrics\n\n## NEXT SESSION SHOULD\n[Priority items for next session]" }] };
@@ -78,13 +108,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "get_dispatch_template":
       return { content: [{ type: "text", text: "# TASK: [Title]\n# Priority: [HIGH/MEDIUM/LOW]\n# Dispatched: [Date]\n\n## CONTEXT\n[Why this task exists]\n\n## WHAT TO DO\n[Numbered steps]\n\n## IMPORTANT NOTES\n- Run preflight before any edit\n- Write progress as you go\n- If you run out of turns, document where you stopped\n\n## DISPATCH COMMAND\n```\ncd /root && nohup claude -p \"$(cat /root/family-data/TASK_NAME.md)\" --max-turns 25 > /root/family-logs/task-name.log 2>&1 &\n```" }] };
     
-    case "emergency_kill_switch":
+    case "get_kill_switch_instructions":
       return { content: [{ type: "text", text: "KILL SWITCH: This tool requires server-side execution with KILL_SECRET environment variable. In local/stdio mode, use: pm2 stop all" }] };
     
-    case "verify_audit_chain":
+    case "get_audit_verification_instructions":
       return { content: [{ type: "text", text: "AUDIT CHAIN: Verification requires access to the audit-chain.json file on the server. In local/stdio mode, the chain file location is configurable. Server-side endpoint: GET /audit/verify" }] };
     
-    case "dispatch_to_llm":
+    case "get_dispatch_command":
       return { content: [{ type: "text", text: `DISPATCH: Task received: "${args?.task || 'no task'}". In local/stdio mode, dispatch with:\nnohup claude -p "${args?.task}" --max-turns ${args?.max_turns || 15} > /tmp/dispatch-${Date.now()}.log 2>&1 &` }] };
     
     case "audit_mcp_config": {
@@ -120,7 +150,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(RULES, null, 2) }] };
   }
   if (uri === "ns://stats") {
-    return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify({ violations: 58, bypasses: 0, blocked: 32, processes: 22, uptime_days: 25, version: "1.12.1" }, null, 2) }] };
+    return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify({ violations: 58, bypasses: 0, blocked: 32, processes: 22, uptime_days: 25, version: "2.0.0" }, null, 2) }] };
   }
   return { contents: [{ uri, mimeType: "text/plain", text: "Unknown resource" }] };
 });

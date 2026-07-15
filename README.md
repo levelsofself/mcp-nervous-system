@@ -30,3 +30,22 @@ For CI/agent use, the same checks plus audit-chain verification are available as
 - `GET  https://api.100levelup.com/x402/verify-audit` - audit-chain verification ($0.005 USDC)
 
 Discovery: [`/openapi.json`](https://api.100levelup.com/openapi.json) and [`/llms.txt`](https://api.100levelup.com/llms.txt).
+
+## 2.0.0: what each tool actually does
+
+This release renames every tool that described an action it did not perform.
+
+| Tool | Does real work? |
+|---|---|
+| `audit_mcp_config` | **Yes.** Deterministic lint. Inline secrets, shell wrappers, unpinned packages, broad filesystem scope, non-TLS transports, unpinned docker tags. Returns findings with severities and a 0-100 score. |
+| `check_preflight` | **Yes**, when configured. Reads `protected_files_list` from `nervous-system.config.json` or `NERVOUS_SYSTEM_PROTECTED_LIST`. With no list it says so instead of guessing. If the list is unreadable it FAILS CLOSED. |
+| `get_*` (everything else) | **No.** They return text: the framework, templates, instructions. That is why they are named `get_`. |
+
+### Breaking changes from 1.x
+- `emergency_kill_switch` is now `get_kill_switch_instructions`. It never stopped anything; it returned a string.
+- `verify_audit_chain` is now `get_audit_verification_instructions`. It never verified a chain.
+- `dispatch_to_llm` is now `get_dispatch_command`. It never dispatched.
+- `check_preflight` no longer matches three hardcoded filenames from the author's own server. One of them (`tamara-v5`) did not exist, so the tool returned "you may edit it" for the real protected file. It now reads your list, or admits it has none.
+- Hardcoded fleet counts and violation totals are removed from `get_origin_story`. A number baked into a package is a fossil the moment it ships.
+
+The full write-capable toolset (kill switch, dispatch, audits, session close) runs server-side at `api.100levelup.com`. This package is the local half and says so.
